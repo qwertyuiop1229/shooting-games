@@ -1,0 +1,20 @@
+{
+  "name": "Zero-G Space Shooter Online",
+  "short_name": "Zero-G Shooter",
+  "icons": [
+    {
+      "src": "icon/icon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon/icon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000a14",
+  "theme_color": "#00f0ff"
+}

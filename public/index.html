@@ -27,8 +27,6 @@
             margin: 0;
             cursor: crosshair;
             overflow: hidden;
-            position: fixed;
-            width: 100%;
         }
 
         html,
@@ -54,8 +52,8 @@
         .hud {
             display: none;
             position: fixed;
-            left: 20px;
-            bottom: 20px;
+            left: calc(20px + env(safe-area-inset-left, 0px));
+            bottom: calc(20px + env(safe-area-inset-bottom, 0px));
             pointer-events: none;
             opacity: 0.85;
             font-size: 13px;
@@ -80,8 +78,8 @@
 
         .top-right {
             position: fixed;
-            right: 20px;
-            top: 20px;
+            right: calc(20px + env(safe-area-inset-right, 0px));
+            top: calc(20px + env(safe-area-inset-top, 0px));
             text-align: right;
             font-size: 13px;
             opacity: 0.9;
@@ -136,6 +134,7 @@
             text-align: center;
             -webkit-overflow-scrolling: touch;
             touch-action: manipulation;
+            animation: modalIn 0.22s ease-out forwards;
         }
 
         .game-modal h3 {
@@ -256,12 +255,18 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 10px 0;
-            border-bottom: 1px dashed rgba(0, 240, 255, 0.2);
+            padding: 10px 4px;
+            border-bottom: 1px dashed rgba(0, 240, 255, 0.1);
+            border-radius: 3px;
+            transition: background 0.15s ease;
         }
 
         .setting-row:last-child {
             border-bottom: none;
+        }
+
+        .setting-row:hover {
+            background: rgba(0, 240, 255, 0.03);
         }
 
         /* ===== キー設定リストのスクロール対応 ===== */
@@ -535,14 +540,15 @@
         /* スマホ用レスポンシブ対応 */
         @media (max-width: 768px) {
             .game-modal {
-                width: 90% !important;
+                width: 86vw !important;
                 max-width: 420px;
-                padding: 16px 12px;
+                padding: 18px 14px;
+                box-sizing: border-box;
             }
 
             /* マルチプレイ待機室のレイアウトをモバイル用に最適化 */
             #roomWaitModal {
-                width: 90% !important;
+                width: 86vw !important;
                 max-width: 420px !important;
             }
 
@@ -582,18 +588,27 @@
 
             .top-right {
                 font-size: 11px;
-                top: 10px;
-                right: 10px;
+                top: calc(10px + env(safe-area-inset-top, 0px));
+                right: calc(10px + env(safe-area-inset-right, 0px));
+            }
+
+            .settings-tab-bar {
+                font-size: 11px;
+            }
+
+            .settings-tab {
+                padding: 8px 10px;
             }
         }
 
         @media (max-width: 600px) {
             .game-modal {
-                width: 80vw !important;
+                width: 84vw !important;
                 max-width: 380px;
                 max-height: 80vh;
                 overflow-y: auto;
                 padding: 14px 10px;
+                box-sizing: border-box;
             }
 
             .game-modal h3 {
@@ -609,8 +624,8 @@
             .setting-row {
                 flex-direction: column;
                 align-items: flex-start;
-                gap: 4px;
-                border-bottom: none;
+                gap: 6px;
+                padding: 8px 4px;
             }
 
             .team-action-btn {
@@ -621,10 +636,11 @@
 
         @media (max-width: 400px) {
             .game-modal {
-                width: 74vw !important;
+                width: 82vw !important;
                 max-width: 340px;
-                max-height: 74vh;
-                padding: 10px 6px;
+                max-height: 78vh;
+                padding: 12px 8px;
+                box-sizing: border-box;
             }
 
             .game-modal h3 {
@@ -944,6 +960,171 @@
                 0 0 15px rgba(0, 240, 255, 0.3),
                 inset 0 0 10px rgba(0, 240, 255, 0.3);
         }
+
+        /* ===== モーダルアニメーション ===== */
+        @keyframes modalIn {
+            from {
+                opacity: 0;
+                transform: translate(-50%, -50%) scale(0.92);
+            }
+
+            to {
+                opacity: 1;
+                transform: translate(-50%, -50%) scale(1);
+            }
+        }
+
+        @keyframes modalOut {
+            from {
+                opacity: 1;
+                transform: translate(-50%, -50%) scale(1);
+            }
+
+            to {
+                opacity: 0;
+                transform: translate(-50%, -50%) scale(0.92);
+            }
+        }
+
+        .game-modal.modal-enter {
+            animation: modalIn 0.22s ease-out forwards;
+        }
+
+        .game-modal.modal-leave {
+            animation: modalOut 0.15s ease-in forwards;
+            pointer-events: none;
+        }
+
+        /* ===== ボタン クリックリップル ===== */
+        .cyber-btn {
+            position: relative;
+            overflow: hidden;
+        }
+
+        .cyber-btn .btn-ripple {
+            position: absolute;
+            border-radius: 50%;
+            background: rgba(0, 240, 255, 0.25);
+            transform: scale(0);
+            animation: rippleAnim 0.45s ease-out forwards;
+            pointer-events: none;
+        }
+
+        .btn-red .btn-ripple {
+            background: rgba(255, 0, 85, 0.2);
+        }
+
+        .btn-green .btn-ripple {
+            background: rgba(0, 255, 102, 0.2);
+        }
+
+        .btn-pink .btn-ripple {
+            background: rgba(255, 0, 255, 0.2);
+        }
+
+        .btn-orange .btn-ripple {
+            background: rgba(255, 136, 0, 0.2);
+        }
+
+        @keyframes rippleAnim {
+            to {
+                transform: scale(3);
+                opacity: 0;
+            }
+        }
+
+        /* ===== トグルバウンスアニメーション ===== */
+        @keyframes toggleBounce {
+            0% {
+                transform: scale(1);
+            }
+
+            40% {
+                transform: scale(1.15);
+            }
+
+            100% {
+                transform: scale(0.98);
+            }
+        }
+
+        .toggle.bounce .knob {
+            animation: toggleBounce 0.2s ease-out;
+        }
+
+        /* ===== 設定タブUI ===== */
+        .settings-tab-bar {
+            display: flex;
+            border-bottom: 1px solid rgba(0, 240, 255, 0.2);
+            margin-bottom: 14px;
+            gap: 0;
+            font-size: 12px;
+        }
+
+        .settings-tab {
+            flex: 1;
+            padding: 10px 12px;
+            text-align: center;
+            cursor: pointer;
+            color: rgba(0, 240, 255, 0.4);
+            font-weight: bold;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            border-bottom: 2px solid transparent;
+            transition: color 0.2s, border-color 0.2s, background 0.2s;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+        }
+
+        .settings-tab:hover {
+            color: rgba(0, 240, 255, 0.7);
+            background: rgba(0, 240, 255, 0.02);
+        }
+
+        .settings-tab.tab-active {
+            color: #00f0ff;
+            border-bottom-color: #00f0ff;
+            text-shadow: 0 0 6px rgba(0, 240, 255, 0.4);
+        }
+
+        .settings-tab-content {
+            display: none;
+            animation: tabFadeIn 0.2s ease-out;
+        }
+
+        .settings-tab-content.tab-visible {
+            display: block;
+        }
+
+        @keyframes tabFadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(4px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* ===== 設定セクションヘッダー ===== */
+        .settings-section-header {
+            font-size: 11px;
+            color: #00f0ff;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            margin: 14px 0 6px 0;
+            padding-bottom: 4px;
+            border-bottom: 1px solid rgba(0, 240, 255, 0.12);
+            opacity: 0.8;
+            font-weight: bold;
+        }
+
+        .settings-section-header:first-child {
+            margin-top: 0;
+        }
     </style>
 </head>
 <!-- Google tag (gtag.js) -->
@@ -989,24 +1170,154 @@
                 </button>
             </div>
 
-            <!-- 統合設定メニュー -->
+            <!-- 統合設定メニュー (タブ式) -->
             <div id="pauseSettingsView" style="display: none">
-                <button id="openKeymapFromMenu" class="cyber-btn" style="width: 80%; margin-bottom: 8px">
-                    キー設定</button><br />
-                <button id="openBasicSettings" class="cyber-btn" style="width: 80%; margin-bottom: 8px">
-                    ディスプレイ設定</button><br />
-                <button id="openAudioSettings" class="cyber-btn" style="width: 80%; margin-bottom: 16px">
-                    オーディオ設定</button><br />
-                <button id="btnBackToPauseMain" class="cyber-btn" style="width: 80%">
-                    戻る
-                </button>
-                <div style="
-              margin-top: 16px;
-              font-size: 11px;
-              color: rgba(0, 240, 255, 0.5);
-              letter-spacing: 1px;
-            ">
-                    v<span id="versionText"></span>
+                <div class="settings-tab-bar">
+                    <div class="settings-tab tab-active" data-tab="display">DISPLAY</div>
+                    <div class="settings-tab" data-tab="audio">AUDIO</div>
+                    <div class="settings-tab" data-tab="controls">CONTROLS</div>
+                </div>
+
+                <!-- ===== DISPLAY タブ ===== -->
+                <div class="settings-tab-content tab-visible" data-tab-content="display">
+                    <div class="settings-container">
+                        <div class="settings-section-header">ビジュアル</div>
+                        <div class="setting-row">
+                            <div>すべて表示</div>
+                            <div id="toggleAll" class="toggle" role="switch" aria-checked="true" tabindex="0">
+                                <div class="knob"></div>
+                            </div>
+                        </div>
+                        <div class="setting-row">
+                            <div>背景の星</div>
+                            <div id="toggleStars" class="toggle" role="switch" aria-checked="true" tabindex="0">
+                                <div class="knob"></div>
+                            </div>
+                        </div>
+                        <div class="setting-row">
+                            <div>パーティクル</div>
+                            <div id="toggleParticles" class="toggle" role="switch" aria-checked="true" tabindex="0">
+                                <div class="knob"></div>
+                            </div>
+                        </div>
+                        <div class="setting-row">
+                            <div>グロー</div>
+                            <div id="toggleGlow" class="toggle" role="switch" aria-checked="true" tabindex="0">
+                                <div class="knob"></div>
+                            </div>
+                        </div>
+                        <div class="setting-row">
+                            <div>ダメージ表示</div>
+                            <div id="toggleDamage" class="toggle" role="switch" aria-checked="true" tabindex="0">
+                                <div class="knob"></div>
+                            </div>
+                        </div>
+                        <div class="setting-row">
+                            <div>ダメージ文字サイズ</div>
+                            <input type="range" id="damageTextSizeSlider" min="10" max="60" step="1" value="24" />
+                        </div>
+
+                        <div class="settings-section-header">ミニマップ</div>
+                        <div class="setting-row">
+                            <div>ミニマップ</div>
+                            <div id="toggleMinimap" class="toggle" role="switch" aria-checked="true" tabindex="0">
+                                <div class="knob"></div>
+                            </div>
+                        </div>
+                        <div class="setting-row">
+                            <div>障害物</div>
+                            <div id="toggleMinimapAsteroids" class="toggle" role="switch" aria-checked="true"
+                                tabindex="0">
+                                <div class="knob"></div>
+                            </div>
+                        </div>
+
+                        <div class="settings-section-header">パフォーマンス</div>
+                        <div class="setting-row">
+                            <div>軽量化モード</div>
+                            <div id="lightweightToggle" class="toggle" role="switch" aria-checked="false" tabindex="0">
+                                <div class="knob"></div>
+                            </div>
+                        </div>
+                        <div class="setting-row">
+                            <div>画面シェイク</div>
+                            <div id="toggleShake" class="toggle" role="switch" aria-checked="true" tabindex="0">
+                                <div class="knob"></div>
+                            </div>
+                        </div>
+                        <div class="setting-row">
+                            <div>シェイク強度</div>
+                            <input type="range" id="shakeIntensitySlider" min="0" max="100" step="5" value="100" />
+                        </div>
+
+                        <div class="settings-section-header">システム</div>
+                        <div class="setting-row">
+                            <div>全画面表示</div>
+                            <div id="toggleFullscreen" class="toggle" role="switch" aria-checked="false" tabindex="0">
+                                <div class="knob"></div>
+                            </div>
+                        </div>
+                        <div class="setting-row">
+                            <div>デベロッパーモード</div>
+                            <div id="toggleDevMode" class="toggle" role="switch" tabindex="0">
+                                <div class="knob"></div>
+                            </div>
+                        </div>
+                        <div style="font-size: 11px; color: rgba(0,240,255,0.5); margin-top: 6px; text-align: left;">
+                            ※ +/- キーで画面のズームが可能です。
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ===== AUDIO タブ ===== -->
+                <div class="settings-tab-content" data-tab-content="audio">
+                    <div class="settings-container">
+                        <div class="setting-row">
+                            <span>BGM 音量</span>
+                            <input type="range" id="bgmVolume" min="0" max="1" step="0.01" value="0.3" />
+                        </div>
+                        <div class="setting-row">
+                            <span>効果音 音量</span>
+                            <input type="range" id="sfxVolume" min="0" max="2" step="0.01" value="0.4" />
+                        </div>
+                        <div class="setting-row">
+                            <span>ブースト効果音</span>
+                            <div id="toggleBoostSound" class="toggle" role="switch" tabindex="0">
+                                <div class="knob"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ===== CONTROLS タブ ===== -->
+                <div class="settings-tab-content" data-tab-content="controls">
+                    <div class="settings-container">
+                        <div class="setting-row">
+                            <div>操作モード (ON:マウス / OFF:キーボード)</div>
+                            <div id="toggleControlMode" class="toggle" role="switch" tabindex="0">
+                                <div class="knob"></div>
+                            </div>
+                        </div>
+                        <div class="setting-row">
+                            <div>スマホ用操作UI</div>
+                            <div id="toggleTouchUI" class="toggle" role="switch" tabindex="0">
+                                <div class="knob"></div>
+                            </div>
+                        </div>
+                        <button id="openKeymapFromMenu" class="cyber-btn" style="width: 100%; margin-top: 12px">
+                            キー設定を開く
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 下部ボタン -->
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 14px;">
+                    <button id="changeNicknameBtn" class="cyber-btn"
+                        style="font-size: 11px; padding: 6px 12px;">名前を変更</button>
+                    <div style="font-size: 10px; color: rgba(0,240,255,0.4); letter-spacing: 1px;">v<span
+                            id="versionText"></span></div>
+                    <button id="btnBackToPauseMain" class="cyber-btn"
+                        style="font-size: 11px; padding: 6px 12px;">戻る</button>
                 </div>
             </div>
         </div>
@@ -1027,118 +1338,6 @@
             </div>
         </div>
 
-        <div id="basicSettingsModal" class="game-modal" role="dialog" aria-modal="true" aria-hidden="true"
-            style="display: none">
-            <h3>DISPLAY SETTINGS</h3>
-            <div class="settings-container">
-                <div class="setting-row">
-                    <div>操作モード (ON:マウス / OFF:キーボード)</div>
-                    <div id="toggleControlMode" class="toggle" role="switch" tabindex="0">
-                        <div class="knob"></div>
-                    </div>
-                </div>
-                <div class="setting-row">
-                    <div>すべて表示</div>
-                    <div id="toggleAll" class="toggle" role="switch" aria-checked="true" tabindex="0">
-                        <div class="knob"></div>
-                    </div>
-                </div>
-                <div class="setting-row">
-                    <div>背景の星</div>
-                    <div id="toggleStars" class="toggle" role="switch" aria-checked="true" tabindex="0">
-                        <div class="knob"></div>
-                    </div>
-                </div>
-                <div class="setting-row">
-                    <div>ミニマップ</div>
-                    <div id="toggleMinimap" class="toggle" role="switch" aria-checked="true" tabindex="0">
-                        <div class="knob"></div>
-                    </div>
-                </div>
-                <div class="setting-row">
-                    <div>パーティクル</div>
-                    <div id="toggleParticles" class="toggle" role="switch" aria-checked="true" tabindex="0">
-                        <div class="knob"></div>
-                    </div>
-                </div>
-                <div class="setting-row">
-                    <div>グロー</div>
-                    <div id="toggleGlow" class="toggle" role="switch" aria-checked="true" tabindex="0">
-                        <div class="knob"></div>
-                    </div>
-                </div>
-                <div class="setting-row">
-                    <div>ミニマップの障害物</div>
-                    <div id="toggleMinimapAsteroids" class="toggle" role="switch" aria-checked="true" tabindex="0">
-                        <div class="knob"></div>
-                    </div>
-                </div>
-                <div class="setting-row">
-                    <div>ダメージ表示</div>
-                    <div id="toggleDamage" class="toggle" role="switch" aria-checked="true" tabindex="0">
-                        <div class="knob"></div>
-                    </div>
-                </div>
-                <div class="setting-row">
-                    <div>画面シェイク</div>
-                    <div id="toggleShake" class="toggle" role="switch" aria-checked="true" tabindex="0">
-                        <div class="knob"></div>
-                    </div>
-                </div>
-                <div class="setting-row">
-                    <div>シェイク強度</div>
-                    <input type="range" id="shakeIntensitySlider" min="0" max="100" step="5" value="100" />
-                </div>
-                <div style="height: 4px"></div>
-                <div class="setting-row">
-                    <div>全画面表示</div>
-                    <div id="toggleFullscreen" class="toggle" role="switch" aria-checked="false" tabindex="0">
-                        <div class="knob"></div>
-                    </div>
-                </div>
-                <div class="setting-row">
-                    <div>スマホ用操作UI</div>
-                    <div id="toggleTouchUI" class="toggle" role="switch" tabindex="0">
-                        <div class="knob"></div>
-                    </div>
-                </div>
-                <div style="height: 4px"></div>
-                <div class="setting-row">
-                    <div>ダメージテキストのサイズ</div>
-                    <input type="range" id="damageTextSizeSlider" min="10" max="60" step="1" value="24" />
-                </div>
-                <div style="height: 4px"></div>
-                <div class="setting-row">
-                    <div>軽量化モード</div>
-                    <div id="lightweightToggle" class="toggle" role="switch" aria-checked="false" tabindex="0">
-                        <div class="knob"></div>
-                    </div>
-                </div>
-                <div style="height: 8px"></div>
-                <div class="setting-row">
-                    <div>デベロッパーモード</div>
-                    <div id="toggleDevMode" class="toggle" role="switch" tabindex="0">
-                        <div class="knob"></div>
-                    </div>
-                </div>
-                <div style="
-              font-size: 12px;
-              color: #00f0ff;
-              margin-top: 8px;
-              text-align: left;
-            ">
-                    ※ +/- キーで画面のズームが可能です。
-                </div>
-            </div>
-            <div style="
-            display: flex;
-            justify-content: space-between;
-            margin-top: 16px;
-          ">
-                <button id="changeNicknameBtn" class="cyber-btn">名前を変更</button>
-                <button id="applyBasicClose" class="cyber-btn">閉じる</button>
-            </div>
-        </div>
 
         <div class="hud">
             <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / <kbd>↑</kbd><kbd>←</kbd><kbd>↓</kbd><kbd>→</kbd>
@@ -1677,7 +1876,6 @@
             ホームに戻る
         </button>
     </div>
-
     <div id="rankingModal" class="game-modal" style="display: none">
         <h3>TOP PILOTS</h3>
         <div id="rankingTabs" style="
@@ -1701,26 +1899,6 @@
         <button id="closeRankingBtn" class="cyber-btn">閉じる</button>
     </div>
 
-    <div id="audioSettingsModal" class="game-modal" style="display: none">
-        <h3>AUDIO SETTINGS</h3>
-        <div class="setting-row">
-            <span>BGM 音量</span>
-            <input type="range" id="bgmVolume" min="0" max="1" step="0.01" value="0.3" />
-        </div>
-        <div class="setting-row">
-            <span>効果音 音量</span>
-            <input type="range" id="sfxVolume" min="0" max="2" step="0.01" value="0.4" />
-        </div>
-        <div class="setting-row">
-            <span>ブースト効果音</span>
-            <div id="toggleBoostSound" class="toggle" role="switch" tabindex="0">
-                <div class="knob"></div>
-            </div>
-        </div>
-        <button id="closeAudioSettings" class="cyber-btn" style="margin-top: 16px">
-            閉じる
-        </button>
-    </div>
 
     <script>
         /* 2D 宇宙ドッグファイト - Photon + Firestore オンライン対応版 (完全版) */
@@ -6013,33 +6191,22 @@
         const resetDefaultsBtn = document.getElementById("resetDefaults");
         const bindingNoticeDiv = document.getElementById("bindingNotice");
         const pauseSettingsMenu = document.getElementById("pauseSettingsMenu");
-        const openKeymapFromMenuBtn =
-            document.getElementById("openKeymapFromMenu");
-        const openBasicSettingsBtn = document.getElementById("openBasicSettings");
-        const closePauseSettingsBtn =
-            document.getElementById("closePauseSettings");
-        const basicSettingsModal = document.getElementById("basicSettingsModal");
+        const openKeymapFromMenuBtn = document.getElementById("openKeymapFromMenu");
+        const closePauseSettingsBtn = document.getElementById("closePauseSettings");
         const lightweightToggle = document.getElementById("lightweightToggle");
-        const applyBasicCloseBtn = document.getElementById("applyBasicClose");
         const changeNicknameBtn = document.getElementById("changeNicknameBtn");
         const toggleAllElem = document.getElementById("toggleAll");
         const toggleStarsElem = document.getElementById("toggleStars");
         const toggleMinimapElem = document.getElementById("toggleMinimap");
         const toggleParticlesElem = document.getElementById("toggleParticles");
         const toggleGlowElem = document.getElementById("toggleGlow");
-        const toggleMinimapAsteroidsElem = document.getElementById(
-            "toggleMinimapAsteroids",
-        );
+        const toggleMinimapAsteroidsElem = document.getElementById("toggleMinimapAsteroids");
         const toggleDamageElem = document.getElementById("toggleDamage");
         const toggleShakeElem = document.getElementById("toggleShake");
-        const toggleControlModeElem =
-            document.getElementById("toggleControlMode");
+        const toggleControlModeElem = document.getElementById("toggleControlMode");
         const toggleTouchUIElem = document.getElementById("toggleTouchUI");
         const toggleFullscreenElem = document.getElementById("toggleFullscreen");
-        const audioSettingsModal = document.getElementById("audioSettingsModal");
-        const openAudioSettingsBtn = document.getElementById("openAudioSettings");
-        const closeAudioSettingsBtn =
-            document.getElementById("closeAudioSettings");
+
         const bgmVolumeSlider = document.getElementById("bgmVolume");
         const sfxVolumeSlider = document.getElementById("sfxVolume");
         const damageTextSizeSlider = document.getElementById(
@@ -6047,20 +6214,62 @@
         );
         const toggleBoostSoundElem = document.getElementById("toggleBoostSound");
 
-        const btnOpenSettingsView = document.getElementById(
-            "btnOpenSettingsView",
-        );
+        const btnOpenSettingsView = document.getElementById("btnOpenSettingsView");
         const pauseMainView = document.getElementById("pauseMainView");
         const pauseSettingsView = document.getElementById("pauseSettingsView");
         const btnBackToPauseMain = document.getElementById("btnBackToPauseMain");
+
+        // タブ切り替えロジック
+        const settingsTabs = document.querySelectorAll(".settings-tab");
+        const settingsTabContents = document.querySelectorAll(".settings-tab-content");
+        settingsTabs.forEach(tab => {
+            tab.addEventListener("click", () => {
+                settingsTabs.forEach(t => t.classList.remove("tab-active"));
+                settingsTabContents.forEach(c => c.classList.remove("tab-visible"));
+                tab.classList.add("tab-active");
+                document.querySelector(`.settings-tab-content[data-tab-content="${tab.dataset.tab}"]`).classList.add("tab-visible");
+            });
+        });
+
+        function populateSettingsUI() {
+            setLightweightUI(lightweightMode);
+            setToggleElem(toggleControlModeElem, controlMode === "mouse");
+            setToggleElem(toggleTouchUIElem, useTouchUI);
+            setToggleElem(toggleFullscreenElem, !!document.fullscreenElement);
+            setToggleElem(toggleStarsElem, showStars);
+            setToggleElem(toggleMinimapElem, showMinimap);
+            setToggleElem(toggleParticlesElem, showParticles);
+            setToggleElem(toggleGlowElem, showGlow);
+            setToggleElem(toggleMinimapAsteroidsElem, showMinimapAsteroids);
+            setToggleElem(toggleDamageElem, showDamage);
+            setToggleElem(toggleShakeElem, enableShake);
+            setToggleElem(
+                toggleAllElem,
+                showStars &&
+                showMinimap &&
+                showParticles &&
+                showGlow &&
+                showMinimapAsteroids &&
+                showDamage &&
+                enableShake
+            );
+            const shakeSlider = document.getElementById("shakeIntensitySlider");
+            if (shakeSlider) {
+                shakeSlider.value = Math.round((featureSettings.shakeIntensity !== undefined ? featureSettings.shakeIntensity : 1.0) * 100);
+            }
+        }
 
         btnOpenSettingsView?.addEventListener("click", () => {
             pauseMainView.style.display = "none";
             pauseSettingsView.style.display = "block";
             document.getElementById("settingsMenuTitle").innerText = "SETTINGS";
+            populateSettingsUI();
         });
 
         btnBackToPauseMain?.addEventListener("click", () => {
+            saveFeatureSettings(featureSettings); // Save display settings
+            saveAudioSettings(audioSettings.sfx, audioSettings.bgm, audioSettings.boostSound); // Save audio settings
+
             if (isSettingsFromHome) {
                 document.getElementById("pauseSettingsMenu").style.display = "none";
                 document.getElementById("modeSelectModal").style.display = "block";
@@ -6091,6 +6300,7 @@
                 document.getElementById("settingsMenuTitle").innerText = "SETTINGS";
                 document.getElementById("pauseSubText").style.display = "none";
                 isSettingsFromHome = true;
+                populateSettingsUI();
             });
 
         openKeymapFromMenuBtn?.addEventListener("click", () => {
@@ -6100,42 +6310,7 @@
             bindingAction = null;
             updateBindingNotice();
         });
-        openBasicSettingsBtn?.addEventListener("click", () => {
-            basicSettingsModal.style.display = "block";
-            pauseSettingsMenu.style.display = "none";
-            setLightweightUI(lightweightMode);
-            setToggleElem(toggleControlModeElem, controlMode === "mouse");
-            setToggleElem(toggleTouchUIElem, useTouchUI);
-            setToggleElem(toggleFullscreenElem, !!document.fullscreenElement);
-            setToggleElem(toggleStarsElem, showStars);
-            setToggleElem(toggleMinimapElem, showMinimap);
-            setToggleElem(toggleParticlesElem, showParticles);
-            setToggleElem(toggleGlowElem, showGlow);
-            setToggleElem(toggleMinimapAsteroidsElem, showMinimapAsteroids);
-            setToggleElem(toggleDamageElem, showDamage);
-            setToggleElem(toggleShakeElem, enableShake);
-            setToggleElem(
-                toggleAllElem,
-                showStars &&
-                showMinimap &&
-                showParticles &&
-                showGlow &&
-                showMinimapAsteroids &&
-                showDamage &&
-                enableShake,
-            );
-            const shakeSlider = document.getElementById("shakeIntensitySlider");
-            if (shakeSlider)
-                shakeSlider.value = Math.round(
-                    (featureSettings.shakeIntensity !== undefined
-                        ? featureSettings.shakeIntensity
-                        : 1.0) * 100,
-                );
-        });
-        openAudioSettingsBtn?.addEventListener("click", () => {
-            audioSettingsModal.style.display = "block";
-            pauseSettingsMenu.style.display = "none";
-        });
+        /* openBasicSettingsBtn and openAudioSettingsBtn are removed since we are using tabs */
 
         closePauseSettingsBtn?.addEventListener("click", () => {
             setPauseState(false);
@@ -6248,6 +6423,11 @@
 
         function setToggleElem(el, on) {
             if (!el) return;
+            // Add bounce animation
+            el.classList.remove("bounce");
+            void el.offsetWidth; // trigger reflow
+            el.classList.add("bounce");
+
             if (on) {
                 el.classList.add("on");
                 el.setAttribute("aria-checked", "true");
@@ -6256,6 +6436,22 @@
                 el.setAttribute("aria-checked", "false");
             }
         }
+
+        // ゴースト/リップルエフェクト追加
+        document.addEventListener('click', function (e) {
+            let btn = e.target.closest('.cyber-btn');
+            if (btn && !btn.disabled) {
+                let ripple = document.createElement('div');
+                ripple.className = 'btn-ripple';
+                let rect = btn.getBoundingClientRect();
+                let size = Math.max(rect.width, rect.height);
+                ripple.style.width = ripple.style.height = size + 'px';
+                ripple.style.left = (e.clientX - rect.left - size / 2) + 'px';
+                ripple.style.top = (e.clientY - rect.top - size / 2) + 'px';
+                btn.appendChild(ripple);
+                setTimeout(() => ripple.remove(), 450);
+            }
+        });
         function setLightweightUI(on) {
             setToggleElem(lightweightToggle, on);
         }
@@ -6459,11 +6655,7 @@
                 applyFeatureSettingsToRuntime();
             }
         });
-        applyBasicCloseBtn?.addEventListener("click", () => {
-            basicSettingsModal.style.display = "none";
-            pauseSettingsMenu.style.display = "block";
-            saveFeatureSettings(featureSettings);
-        });
+
         damageTextSizeSlider?.addEventListener("input", (e) => {
             featureSettings.damageTextSize = parseInt(e.target.value);
             applyFeatureSettingsToRuntime();
@@ -6541,22 +6733,13 @@
             }
         });
         changeNicknameBtn?.addEventListener("click", () => {
-            basicSettingsModal.style.display = "none";
+            document.getElementById("pauseSettingsView").style.display = "none";
+            document.getElementById("pauseSettingsMenu").style.display = "none";
             nicknameModal.style.display = "block";
             nicknameModalTitle.textContent = "PILOT RE-REGISTRATION";
             nicknameModalDesc.textContent = "新しいコールサインを入力してください";
             nicknameInput.value = localStorage.getItem("playerNickname_v1") || "";
             nicknameInput.focus();
-        });
-
-        closeAudioSettingsBtn?.addEventListener("click", () => {
-            audioSettingsModal.style.display = "none";
-            pauseSettingsMenu.style.display = "block";
-            saveAudioSettings(
-                audioSettings.sfx,
-                audioSettings.bgm,
-                audioSettings.boostSound,
-            );
         });
         function applyBgmVolume() {
             const vol = parseFloat(bgmVolumeSlider.value);

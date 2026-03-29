@@ -641,7 +641,7 @@
         let mouse = { x: 0, y: 0, down: false };
         let bindingAction = null;
 
-        const GAME_VERSION = "1.0.14";
+        const GAME_VERSION = "1.0.15";
         let running = false,
             showHelp = false;
         let isPaused = false;
@@ -719,6 +719,9 @@
 
             if (matchKeyToBind(k, keyBindings.pause) || k === "escape") {
                 e.preventDefault();
+                const rOpen = document.getElementById("rankingModal")?.style.display.includes("block");
+                const cOpen = document.getElementById("cheatWarningModal")?.style.display.includes("block");
+                if (rOpen || cOpen) return;
                 if (running || isPaused) {
                     if (isSettingsFromHome) {
                         document.getElementById("pauseSettingsMenu").style.display =
@@ -2307,16 +2310,15 @@
         
         // チート対策: プレイ開始時間のメモリ秘匿
         const TimeManager = (function () {
-            let _timeKey = Math.floor(Math.random() * 100000000);
-            let _encTime = 0 ^ _timeKey;
+            let _timeKey = Math.floor(Math.random() * 100000);
+            let _encTime = 0;
             return {
                 setStartTime: function (val) {
-                    let v = Math.floor(val);
-                    _timeKey = Math.floor(Math.random() * 100000000);
-                    _encTime = v ^ _timeKey;
+                    _timeKey = Math.floor(Math.random() * 100000);
+                    _encTime = val + _timeKey;
                 },
                 getStartTime: function () {
-                    return _encTime ^ _timeKey;
+                    return _encTime === 0 ? 0 : _encTime - _timeKey;
                 }
             };
         })();
@@ -2454,7 +2456,7 @@
             html += "</ol>";
             rankingListDiv.innerHTML = html;
             document.getElementById("rankingModal").style.display = "block";
-            if (running) setPauseState(true);
+            if (running && !gameOverMode) setPauseState(true);
         }
 
         /* ========== 更新 ========== */
@@ -5316,7 +5318,6 @@
                     ships.push(s);
                 }
             }
-            window.currentDifficulty = "normal";
 
             document.getElementById("hudHintText").innerText = settings.spectate
                 ? "(TEST: 観戦モード - P=ポーズ, R=戻る)"

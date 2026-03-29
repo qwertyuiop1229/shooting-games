@@ -1,0 +1,5256 @@
+        /* 2D 宇宙ドッグファイト - Photon + Firestore オンライン対応版 (完全版) */
+        window.addEventListener("contextmenu", (e) => {
+            e.preventDefault();
+        });
+        function isTyping() {
+            const el = document.activeElement;
+            return (
+                el &&
+                (el.tagName === "INPUT" ||
+                    el.tagName === "TEXTAREA" ||
+                    el.tagName === "NUMBER")
+            );
+        }
+
+        /* ========== キー設定 ========== */
+        const defaultKeyBindings = {
+            turnLeft: ["a", "arrowleft"],
+            turnRight: ["d", "arrowright"],
+            thrust: ["w", "arrowup"],
+            brake: ["s", "arrowdown"],
+            shoot: [" "],
+            boost: ["shift"],
+            rollLeft: ["q"],
+            rollRight: ["e"],
+            pause: ["p"],
+            restart: ["r"],
+            help: ["h"],
+        };
+        function loadKeyBindings() {
+            try {
+                const raw = localStorage.getItem("keyBindings_v1");
+                if (!raw) return JSON.parse(JSON.stringify(defaultKeyBindings));
+                const obj = JSON.parse(raw);
+                for (const k in defaultKeyBindings) {
+                    if (!obj[k])
+                        obj[k] = JSON.parse(JSON.stringify(defaultKeyBindings[k]));
+                }
+                return obj;
+            } catch (e) {
+                return JSON.parse(JSON.stringify(defaultKeyBindings));
+            }
+        }
+        function saveKeyBindings(kb) {
+            localStorage.setItem("keyBindings_v1", JSON.stringify(kb));
+        }
+        let keyBindings = loadKeyBindings();
+        const norm = (k) =>
+            k === undefined || k === null ? "" : String(k).toLowerCase();
+        function asArray(b) {
+            return Array.isArray(b) ? b.map(norm) : [norm(b)];
+        }
+        function isAnyPressedForBind(bind) {
+            for (const kk of asArray(bind)) if (keys[kk]) return true;
+            return false;
+        }
+        function matchKeyToBind(k, bind) {
+            return asArray(bind).includes(norm(k));
+        }
+        function prettyKey(k) {
+            k = norm(k);
+            if (k === " ") return "Space";
+            if (k.startsWith("arrow")) {
+                if (k === "arrowup") return "↑";
+                if (k === "arrowdown") return "↓";
+                if (k === "arrowleft") return "←";
+                if (k === "arrowright") return "→";
+            }
+            if (k.length === 1) return k.toUpperCase();
+            return k.charAt(0).toUpperCase() + k.slice(1);
+        }
+        function displayBind(bind) {
+            return asArray(bind).map(prettyKey).join(" / ");
+        }
+
+        /* ========== オーディオ ========== */
+        let audioCtx = null;
+        let sfxGain = null;
+        let musicGain = null;
+        let bgmAudio = null;
+        let boostGain = null;
+        let bgmGainNode = null;
+        let bgmSource = null;
+        function loadAudioSettings() {
+            try {
+                const settings = JSON.parse(localStorage.getItem("audioSettings_v1"));
+                if (settings)
+                    return {
+                        sfx: typeof settings.sfx === "number" ? settings.sfx : 0.4,
+                        bgm: typeof settings.bgm === "number" ? settings.bgm : 0.3,
+                        boostSound:
+                            typeof settings.boostSound === "boolean"
+                                ? settings.boostSound
+                                : false,
+                    };
+            } catch (e) { }
+            return { sfx: 0.4, bgm: 0.3, boostSound: false };
+        }
+        function saveAudioSettings(sfxVol, bgmVol, boostSoundFlag) {
+            localStorage.setItem(
+                "audioSettings_v1",
+                JSON.stringify({
+                    sfx: sfxVol,
+                    bgm: bgmVol,
+                    boostSound: boostSoundFlag,
+                }),
+            );
+        }
+        let audioSettings = loadAudioSettings();
+
+        function initAudio() {
+            if (audioCtx) return;
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            sfxGain = audioCtx.createGain();
+            sfxGain.gain.value = audioSettings.sfx;
+            sfxGain.connect(audioCtx.destination);
+            musicGain = audioCtx.createGain();
+            musicGain.gain.value = 0.04;
+            musicGain.connect(audioCtx.destination);
+            bgmGainNode = audioCtx.createGain();
+            bgmGainNode.gain.value = audioSettings.bgm;
+            bgmGainNode.connect(audioCtx.destination);
+
+            // BGMシンセサイザ初期化
+            const oscA = audioCtx.createOscillator();
+            oscA.type = "sine";
+            oscA.frequency.value = 60;
+            const oscB = audioCtx.createOscillator();
+            oscB.type = "triangle";
+            oscB.frequency.value = 110;
+            const gA = audioCtx.createGain();
+            gA.gain.value = 0.32;
+            const gB = audioCtx.createGain();
+            gB.gain.value = 0.08;
+            oscA.connect(gA);
+            gA.connect(musicGain);
+            oscB.connect(gB);
+            gB.connect(musicGain);
+            oscA.start();
+            oscB.start();
+            const lfo = audioCtx.createOscillator();
+            lfo.type = "sine";
+            lfo.frequency.value = 0.04;
+            const lfoG = audioCtx.createGain();
+            lfoG.gain.value = 30;
+            lfo.connect(lfoG);
+            lfoG.connect(oscA.frequency);
+            lfo.start();
+
+            // ブーストサウンド用ノイズジェネレーター
+            if (!boostGain) {
+                const bufferSize = audioCtx.sampleRate * 2;
+                const noiseBuffer = audioCtx.createBuffer(
+                    1,
+                    bufferSize,
+                    audioCtx.sampleRate,
+                );
+                const output = noiseBuffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    output[i] = Math.random() * 2 - 1;
+                }
+                const noiseSrc = audioCtx.createBufferSource();
+                noiseSrc.buffer = noiseBuffer;
+                noiseSrc.loop = true;
+
+                const noiseFilter = audioCtx.createBiquadFilter();
+                noiseFilter.type = "lowpass";
+                noiseFilter.frequency.value = 120; // 低い周波数で「ゴゴゴゴ」感を出す
+                noiseFilter.Q.value = 2.0;
+
+                boostGain = audioCtx.createGain();
+                boostGain.gain.value = 0;
+
+                noiseSrc.connect(noiseFilter);
+                noiseFilter.connect(boostGain);
+                boostGain.connect(sfxGain);
+
+                noiseSrc.start();
+            }
+
+            const playlistUrls = [
+                "https://shooting-games-1.web.app/oto/1.mp3",
+                "https://shooting-games-1.web.app/oto/2.mp3",
+                "https://shooting-games-1.web.app/oto/3.mp3",
+            ];
+            let musicIndex = 0;
+            function startPlaylist() {
+                if (playlistUrls.length === 0) return;
+                bgmAudio = new Audio();
+                bgmAudio.src = playlistUrls[musicIndex];
+                bgmAudio.loop = false;
+                if (audioCtx && !bgmSource) {
+                    try {
+                        bgmSource = audioCtx.createMediaElementSource(bgmAudio);
+                        bgmSource.connect(bgmGainNode);
+                    } catch (e) { }
+                }
+                bgmAudio.play().catch((err) => {
+                    console.warn("Audio blocked:", err);
+                });
+                bgmAudio.addEventListener("ended", () => {
+                    musicIndex = (musicIndex + 1) % playlistUrls.length;
+                    bgmAudio.src = playlistUrls[musicIndex];
+                    bgmAudio.play().catch((err) => { });
+                });
+            }
+            startPlaylist();
+        }
+
+        function playClickSound() {
+            if (!audioCtx || audioCtx.state === "suspended") return;
+            const now = audioCtx.currentTime;
+            const osc = audioCtx.createOscillator();
+            osc.type = "square";
+            osc.frequency.setValueAtTime(1200, now);
+            osc.frequency.exponentialRampToValueAtTime(600, now + 0.04);
+            const gain = audioCtx.createGain();
+            gain.gain.setValueAtTime(0, now);
+            gain.gain.linearRampToValueAtTime(0.3, now + 0.01); // タップ音を大きめに設定
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+            osc.connect(gain);
+            gain.connect(sfxGain);
+            osc.start(now);
+            osc.stop(now + 0.06);
+        }
+
+        // 全てのボタンにクリック音を委譲で追加
+        document.addEventListener("mousedown", (e) => {
+            if (
+                e.target.closest("button") ||
+                e.target.closest(".toggle") ||
+                e.target.closest(".team-btn") ||
+                e.target.closest('input[type="checkbox"]')
+            ) {
+                playClickSound();
+            }
+        });
+
+        function playLaserSound(x, y) {
+            if (!audioCtx) return;
+            const now = audioCtx.currentTime;
+
+            // 距離による音量減衰を計算
+            let volMod = 1.0;
+            if (x !== undefined && y !== undefined) {
+                const p = ships.find((s) => s.id === playerId);
+                if (p && !p.isGhost) {
+                    // 自機が生きている場合のみ相対距離で計算
+                    const d = Math.sqrt(torusDist2(x, y, p.x, p.y));
+                    // 距離減衰カーブを極端に（近くは大きく、遠くは急激にかすかな音に）
+                    volMod = 1.0 / (1.0 + Math.pow(d / 200, 3));
+                }
+            }
+            // 完全に遠すぎる場合は鳴らさない
+            if (volMod < 0.01) return;
+
+            const osc = audioCtx.createOscillator();
+            osc.type = "triangle";
+            osc.frequency.setValueAtTime(900, now);
+            osc.frequency.exponentialRampToValueAtTime(700, now + 0.06);
+            const g = audioCtx.createGain();
+            g.gain.setValueAtTime(0.0001, now);
+            // 基本の音量も少し大きめに確保しつつ、距離による減衰をかける
+            g.gain.exponentialRampToValueAtTime(
+                Math.max(0.15 * volMod, 0.0001),
+                now + 0.01,
+            );
+            g.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
+            osc.connect(g);
+            g.connect(sfxGain);
+            osc.start(now);
+            osc.stop(now + 0.14);
+        }
+        function playExplosionSound(size = "medium") {
+            if (!audioCtx) return;
+            const now = audioCtx.currentTime;
+            const len = size === "large" ? 1.5 : 0.9;
+            const buf = audioCtx.createBuffer(
+                1,
+                audioCtx.sampleRate * len,
+                audioCtx.sampleRate,
+            );
+            const d = buf.getChannelData(0);
+            for (let i = 0; i < d.length; i++)
+                d[i] =
+                    (Math.random() * 2 - 1) *
+                    (1 - i / d.length) *
+                    (Math.random() * 0.8 + 0.2);
+            const src = audioCtx.createBufferSource();
+            src.buffer = buf;
+            const flt = audioCtx.createBiquadFilter();
+            flt.type = "bandpass";
+            // 機体爆発時(large)は周波数を低くして「ドカーン」という重低音に
+            flt.frequency.setValueAtTime(size === "large" ? 400 : 1800, now);
+            flt.Q.value = 0.9;
+            flt.frequency.exponentialRampToValueAtTime(150, now + len * 0.7);
+            const g = audioCtx.createGain();
+            g.gain.setValueAtTime(0.0001, now);
+            // largeの時のゲイン(音量)を大幅に上げて他の音にかき消されないようにする
+            g.gain.exponentialRampToValueAtTime(
+                size === "large" ? 3.5 : 1.2,
+                now + 0.02,
+            );
+            g.gain.exponentialRampToValueAtTime(0.0001, now + len);
+            src.connect(flt);
+            flt.connect(g);
+            g.connect(sfxGain);
+            src.start(now);
+            src.stop(now + len);
+        }
+        function playPowerUpSound() {
+            if (!audioCtx) return;
+            const now = audioCtx.currentTime;
+            const osc = audioCtx.createOscillator();
+            osc.type = "sine";
+            osc.frequency.setValueAtTime(400, now);
+            osc.frequency.setValueAtTime(600, now + 0.1);
+            osc.frequency.setValueAtTime(800, now + 0.2);
+            osc.frequency.setValueAtTime(1200, now + 0.3);
+            const gain = audioCtx.createGain();
+            gain.gain.setValueAtTime(0.5, now);
+            gain.gain.linearRampToValueAtTime(0.001, now + 0.5);
+            osc.connect(gain);
+            gain.connect(sfxGain);
+            osc.start(now);
+            osc.stop(now + 0.5);
+        }
+
+        /* ========== 初期化コントロール ========== */
+        let controlMode = localStorage.getItem("controlMode_v1") || "mouse";
+        const isMobileDevice =
+            /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+                navigator.userAgent,
+            ) ||
+            "ontouchstart" in window ||
+            navigator.maxTouchPoints > 0;
+        let forceTouchUI_saved = localStorage.getItem("forceTouchUI_v1");
+        let useTouchUI =
+            forceTouchUI_saved !== null
+                ? forceTouchUI_saved === "1"
+                : isMobileDevice;
+
+        const audioHint = document.getElementById("audioHint");
+
+        // 画面のどこかをクリック/キー入力した段階で即座にオーディオを有効化する
+        function enableAudioGlobally() {
+            if (!audioCtx) initAudio();
+            if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+        }
+        window.addEventListener("mousedown", () => {
+            enableAudioGlobally();
+            audioHint.style.display = "none";
+        });
+        window.addEventListener(
+            "touchstart",
+            () => {
+                enableAudioGlobally();
+                audioHint.style.display = "none";
+            },
+            { passive: true },
+        );
+        window.addEventListener("keydown", () => {
+            enableAudioGlobally();
+            audioHint.style.display = "none";
+        });
+
+        function resumeAudioOnFirstGesture() {
+            // すでにオーディオが有効化されていればヒントは表示しない
+            if (audioCtx && audioCtx.state === "running") {
+                audioHint.style.display = "none";
+                return;
+            }
+            audioHint.style.display = "block";
+        }
+
+        /* ========== 基本ユーティリティ ========== */
+        const TAU = Math.PI * 2;
+        const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+        const rand = (a = 0, b = 1) => a + Math.random() * (b - a);
+        const randInt = (a, b) => Math.floor(rand(a, b + 1));
+        let WORLD_W = 10000;
+        let WORLD_H = 10000;
+        function wrap(value, max) {
+            if (value < 0) return value + max;
+            if (value >= max) return value - max;
+            return value;
+        }
+        function torusDelta(ax, ay, bx, by) {
+            let dx = ax - bx;
+            let dy = ay - by;
+            dx = ((dx + WORLD_W / 2) % WORLD_W) - WORLD_W / 2;
+            dy = ((dy + WORLD_H / 2) % WORLD_H) - WORLD_H / 2;
+            return { dx, dy };
+        }
+        function torusDist2(ax, ay, bx, by) {
+            const d = torusDelta(ax, ay, bx, by);
+            return d.dx * d.dx + d.dy * d.dy;
+        }
+        function toScreen(x, y, camX, camY, vw, vh) {
+            const d = torusDelta(x, y, camX, camY);
+            return { sx: d.dx + vw / 2, sy: d.dy + vh / 2 };
+        }
+        function angleLerp(a, b, t) {
+            let diff = ((b - a + Math.PI) % TAU) - Math.PI;
+            return a + diff * t;
+        }
+        function torusLerp(current, target, max, t) {
+            let diff = target - current;
+            if (diff > max / 2) diff -= max;
+            else if (diff < -max / 2) diff += max;
+            return wrap(current + diff * t, max);
+        }
+
+        /* ========== チーム・ファクション判定 ========== */
+        const TEAM_COLORS = {
+            1: "#00f0ff",
+            2: "#ff0055",
+            3: "#00ff66",
+            4: "#ffb300",
+        };
+        function getMyTeam() {
+            return window.isMultiplayer &&
+                photonClient &&
+                photonClient.isJoinedToRoom()
+                ? photonClient.myActor().getCustomProperty("team") || 1
+                : 1;
+        }
+
+        function areEnemies(shipA, shipB) {
+            if (!shipA || !shipB) return false;
+            if (shipA.id === shipB.id) return false;
+            // マルチプレイ or テストプレイはチーム番号で判定
+            if (window.isMultiplayer || window._testPlayMode)
+                return shipA.team !== shipB.team;
+
+            // シングルプレイの場合：プレイヤーと味方AIは同一陣営とする
+            const teamA =
+                shipA.faction === "player" || shipA.faction === "ally"
+                    ? "friend"
+                    : "enemy";
+            const teamB =
+                shipB.faction === "player" || shipB.faction === "ally"
+                    ? "friend"
+                    : "enemy";
+            return teamA !== teamB;
+        }
+
+        /* ========== 軽量化・個別設定 ========== */
+
+        let lightweightMode = localStorage.getItem("lightweight_v1") === "1";
+        let PARTICLE_DRAW_LIMIT = lightweightMode ? 80 : 400;
+        let STAR_LAYERS = lightweightMode ? [0.15, 0.3] : [0.12, 0.3, 0.6];
+        let DRAW_GLOW = !lightweightMode;
+        let MINIMAP_ENABLED = !lightweightMode;
+        let ASTEROID_DRAW_LIMIT = lightweightMode ? 30 : 1000;
+        let DPR_FORCE_ONE = lightweightMode;
+        function applyLightweightMode(en) {
+            lightweightMode = !!en;
+            localStorage.setItem("lightweight_v1", lightweightMode ? "1" : "0");
+            PARTICLE_DRAW_LIMIT = lightweightMode ? 80 : 400;
+            STAR_LAYERS = lightweightMode ? [0.15, 0.3] : [0.12, 0.3, 0.6];
+            DRAW_GLOW = !lightweightMode;
+            MINIMAP_ENABLED = !lightweightMode;
+            ASTEROID_DRAW_LIMIT = lightweightMode ? 30 : 1000;
+            DPR_FORCE_ONE = lightweightMode;
+            try {
+                if (sfxGain)
+                    sfxGain.gain.value = lightweightMode
+                        ? audioSettings.sfx * 0.5
+                        : audioSettings.sfx;
+                if (musicGain) musicGain.gain.value = lightweightMode ? 0.02 : 0.04;
+            } catch (e) { }
+            resize();
+            starCacheNeedsRegen = true;
+        }
+        const DEFAULT_FEATURES = {
+            stars: true,
+            minimap: true,
+            particles: true,
+            glow: true,
+            minimapAsteroids: true,
+            damageTextSize: 24,
+            showDamage: true,
+            enableShake: true,
+            shakeIntensity: 1.0,
+        };
+        function loadFeatureSettings() {
+            try {
+                const raw = localStorage.getItem("featureSettings_v1");
+                if (!raw) return Object.assign({}, DEFAULT_FEATURES);
+                return Object.assign({}, DEFAULT_FEATURES, JSON.parse(raw));
+            } catch (e) {
+                return Object.assign({}, DEFAULT_FEATURES);
+            }
+        }
+        function saveFeatureSettings(obj) {
+            try {
+                localStorage.setItem("featureSettings_v1", JSON.stringify(obj));
+            } catch (e) { }
+        }
+        let featureSettings = loadFeatureSettings();
+        let showStars = !!featureSettings.stars;
+        let showMinimap = !!featureSettings.minimap;
+        let showParticles = !!featureSettings.particles;
+        let showGlow = !!featureSettings.glow;
+        let showMinimapAsteroids = !!featureSettings.minimapAsteroids;
+        let damageTextBaseSize = 24;
+        let zoomLevel = 1.0;
+        let showDamage = featureSettings.showDamage !== false;
+        let enableShake = featureSettings.enableShake !== false;
+        let shakeIntensity =
+            featureSettings.shakeIntensity !== undefined
+                ? featureSettings.shakeIntensity
+                : 1.0;
+        function applyFeatureSettingsToRuntime() {
+            showStars = !!featureSettings.stars;
+            showMinimap = !!featureSettings.minimap;
+            showParticles = !!featureSettings.particles;
+            showGlow = !!featureSettings.glow;
+            showMinimapAsteroids = !!featureSettings.minimapAsteroids;
+            damageTextBaseSize =
+                featureSettings.damageTextSize !== undefined
+                    ? featureSettings.damageTextSize
+                    : 24;
+            showDamage = featureSettings.showDamage !== false;
+            enableShake = featureSettings.enableShake !== false;
+            shakeIntensity =
+                featureSettings.shakeIntensity !== undefined
+                    ? featureSettings.shakeIntensity
+                    : 1.0;
+        }
+        applyFeatureSettingsToRuntime();
+
+        let cameraShake = 0;
+        function shakeCamera(amount) {
+            if (!enableShake) return;
+            amount *= shakeIntensity;
+            if (lightweightMode) amount *= 0.5;
+            cameraShake = Math.min(cameraShake + amount, 50 * shakeIntensity);
+        }
+
+        class FloatingText {
+            constructor(x, y, text, color, life = 1.0, size = 16) {
+                this.x = x;
+                this.y = y;
+                this.vx = rand(-10, 10);
+                this.vy = rand(-20, -40);
+                this.text = text;
+                this.color = color;
+                this.life = life;
+                this.maxLife = life;
+                this.size = size;
+            }
+            update(dt) {
+                this.x += this.vx * dt;
+                this.y += this.vy * dt;
+                this.life -= dt;
+            }
+        }
+        class PowerUp {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.vx = rand(-20, 20);
+                this.vy = rand(-20, 20);
+                this.type = randInt(0, 2);
+                this.colors = ["#00ff66", "#00f0ff", "#f0f"];
+                this.labels = ["HP回復", "拡散弾", "連射弾"];
+                this.color = this.colors[this.type];
+                this.life = 10.0;
+                this.radius = 12;
+                this.rotation = rand(0, TAU);
+            }
+            update(dt) {
+                this.x = wrap(this.x + this.vx * dt, WORLD_W);
+                this.y = wrap(this.y + this.vy * dt, WORLD_H);
+                this.vx *= 0.99;
+                this.vy *= 0.99;
+                this.rotation += dt * 2;
+                this.life -= dt;
+            }
+            apply(player) {
+                playPowerUpSound();
+                let text = this.labels[this.type];
+                if (this.type === 0) {
+                    player.hp = Math.min(player.maxHp, player.hp + 50);
+                    player.healRing = { life: 0.8, maxLife: 0.8, color: "#00ff66" };
+                } else if (this.type === 1) {
+                    player.weaponType = 1;
+                    player.weaponStartTime = performance.now();
+                    player.weaponDuration = 10000;
+                } else if (this.type === 2) {
+                    player.weaponType = 2;
+                    player.weaponStartTime = performance.now();
+                    player.weaponDuration = 10000;
+                }
+                floatingTexts.push(
+                    new FloatingText(
+                        this.x,
+                        this.y,
+                        text,
+                        this.color,
+                        1.5,
+                        Math.max(14, damageTextBaseSize * 0.9),
+                    ),
+                );
+            }
+        }
+        function spawnPowerUp(x, y) {
+            powerups.push(new PowerUp(x, y));
+        }
+        let floatingTexts = [];
+        let powerups = [];
+
+        /* ========== ゲーム状態 ========== */
+        const canvas = document.getElementById("game");
+        const ctx = canvas.getContext("2d", { alpha: false });
+        let dpr = Math.max(1, window.devicePixelRatio || 1);
+        function resize() {
+            dpr = DPR_FORCE_ONE ? 1 : Math.max(1, window.devicePixelRatio || 1);
+            const vv = window.visualViewport;
+            const w = vv ? vv.width : window.innerWidth;
+            const h = vv ? vv.height : window.innerHeight;
+            canvas.width = Math.floor(w * dpr);
+            canvas.height = Math.floor(h * dpr);
+            canvas.style.width = w + "px";
+            canvas.style.height = h + "px";
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            starCacheNeedsRegen = true;
+            drawSpawnMap();
+        }
+        window.addEventListener("resize", resize);
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener("resize", resize);
+        }
+        let keys = {};
+        let mouse = { x: 0, y: 0, down: false };
+        let bindingAction = null;
+
+        const GAME_VERSION = "1.0.12";
+        let running = false,
+            showHelp = false;
+        let isPaused = false;
+        let isSettingsFromHome = false;
+        let powerupsEnabled = true;
+        let hasDisconnectedAlertShown = false;
+        let matchEnded = false;
+        let matchStartTime = 0;
+        let isLeavingRoom = false;
+
+        function setPauseState(paused) {
+            isPaused = paused;
+            const pauseMainView = document.getElementById("pauseMainView");
+            const pauseSettingsView = document.getElementById("pauseSettingsView");
+
+            if (paused) {
+                if (!window.isMultiplayer) running = false;
+                document.getElementById("pauseSettingsMenu").style.display = "block";
+
+                isSettingsFromHome = false;
+                pauseMainView.style.display = "block";
+                pauseSettingsView.style.display = "none";
+                document.getElementById("settingsMenuTitle").innerText = "PAUSE MENU";
+                document.getElementById("closePauseSettings").innerText =
+                    "ゲームに戻る";
+
+                if (window.isMultiplayer) {
+                    document.getElementById("pauseSubText").style.display = "none";
+                    document.getElementById("btnLeaveMultiplayer").style.display =
+                        "inline-block";
+                    document.getElementById("btnLeaveSingleplayer").style.display =
+                        "none";
+                } else {
+                    document.getElementById("pauseSubText").style.display = "block";
+                    document.getElementById("btnLeaveMultiplayer").style.display =
+                        "none";
+                    document.getElementById("btnLeaveSingleplayer").style.display =
+                        "inline-block";
+                }
+            } else {
+                if (!window.isMultiplayer) running = true;
+                document.getElementById("pauseSettingsMenu").style.display = "none";
+                document.querySelectorAll(".game-modal").forEach((m) => {
+                    if (
+                        [
+                            "keymapModal",
+                            "basicSettingsModal",
+                            "audioSettingsModal",
+                        ].includes(m.id)
+                    )
+                        m.style.display = "none";
+                });
+            }
+            updateTouchUIVisibility();
+        }
+
+        window.addEventListener("keydown", (e) => {
+            if (isTyping()) return;
+            const k = (e.key || "").toLowerCase();
+            if (bindingAction) {
+                e.preventDefault();
+                if (k === "escape") {
+                    bindingAction = null;
+                    updateBindingNotice();
+                    return;
+                }
+                keyBindings[bindingAction] = [k];
+                saveKeyBindings(keyBindings);
+                bindingAction = null;
+                renderKeymapList();
+                updateBindingNotice();
+                return;
+            }
+            keys[k] = true;
+
+            if (matchKeyToBind(k, keyBindings.pause) || k === "escape") {
+                e.preventDefault();
+                if (running || isPaused) {
+                    if (isSettingsFromHome) {
+                        document.getElementById("pauseSettingsMenu").style.display =
+                            "none";
+                        document.getElementById("modeSelectModal").style.display =
+                            "block";
+                        isSettingsFromHome = false;
+                    } else {
+                        setPauseState(!isPaused);
+                    }
+                }
+            }
+
+            if (matchKeyToBind(k, keyBindings.restart) || k === "r") {
+                e.preventDefault();
+                if (window.isMultiplayer) return;
+
+                // ゲームオーバー状態ならランキングへ
+                if (
+                    gameOverMode &&
+                    !document
+                        .getElementById("rankingModal")
+                        .style.display.includes("block")
+                ) {
+                    handleGameOverSubmit();
+                    return;
+                }
+
+                running = false;
+                gameOverMode = false;
+                isPaused = false;
+                matchEnded = false;
+                document
+                    .querySelectorAll(".game-modal")
+                    .forEach((m) => (m.style.display = "none"));
+                document.getElementById("pauseSettingsMenu").style.display = "none";
+                document.getElementById("modeSelectModal").style.display = "block";
+                resetGameBackground();
+                ctx.fillStyle = "#050510";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                return;
+            }
+            if (matchKeyToBind(k, keyBindings.help)) {
+                showHelp = !showHelp;
+                e.preventDefault();
+            }
+            if (k === "+" || k === ";") {
+                zoomLevel = Math.min(zoomLevel + 0.1, 3.0);
+                e.preventDefault();
+            }
+            if (k === "-") {
+                zoomLevel = Math.max(zoomLevel - 0.1, 0.3);
+                e.preventDefault();
+            }
+        });
+        window.addEventListener("keyup", (e) => {
+            if (isTyping()) return;
+            keys[(e.key || "").toLowerCase()] = false;
+        });
+        window.addEventListener("mousemove", (e) => {
+            const rect = canvas.getBoundingClientRect();
+            mouse.x = e.clientX - rect.left;
+            mouse.y = e.clientY - rect.top;
+        });
+        window.addEventListener("mousedown", (e) => {
+            if (e.target === canvas) mouse.down = true;
+        });
+        window.addEventListener("mouseup", () => (mouse.down = false));
+        window.addEventListener("wheel", (e) => {
+            if (!running || isPaused || matchEnded) return;
+            if (e.deltaY < 0) {
+                zoomLevel = Math.min(zoomLevel + 0.1, 3.0);
+            } else if (e.deltaY > 0) {
+                zoomLevel = Math.max(zoomLevel - 0.1, 0.3);
+            }
+        });
+
+        window.addEventListener("beforeunload", () => {
+            if (
+                window.isMultiplayer &&
+                photonClient &&
+                photonClient.isJoinedToRoom()
+            ) {
+                if (
+                    window.currentRoomDocId &&
+                    photonClient.myRoom().masterClientId ===
+                    photonClient.myActor().actorNr
+                ) {
+                    if (window.deleteFirestoreRoom)
+                        window.deleteFirestoreRoom(window.currentRoomDocId);
+                }
+            }
+        });
+
+        /* ========== タッチコントロール実装 ========== */
+        const touchUI = document.getElementById("touchUI");
+        const joystickArea = document.getElementById("joystickArea");
+        const joystickBase = document.getElementById("joystickBase");
+        const joystickNub = document.getElementById("joystickNub");
+        let joystickActive = false;
+        let joystickTouchId = null;
+        let joystickCenter = { x: 0, y: 0 };
+        let joystickVector = { x: 0, y: 0 };
+
+        function updateTouchUIVisibility() {
+            const isGameplayActive = running && !isPaused && !matchEnded;
+            const shouldShow = useTouchUI && isGameplayActive;
+
+            const tcm = document.getElementById("toggleControlMode");
+            const shootBtn = document.getElementById("btnTouchShoot");
+
+            if (shouldShow) {
+                touchUI.style.display = "block";
+                controlMode = "touch";
+                if (tcm) tcm.style.opacity = "0.5";
+                // ゲームオーバー時は射撃ボタンをグレーアウト
+                if (shootBtn) {
+                    if (gameOverMode) {
+                        shootBtn.classList.add("disabled");
+                    } else {
+                        shootBtn.classList.remove("disabled");
+                    }
+                }
+            } else {
+                touchUI.style.display = "none";
+                if (controlMode === "touch" && !isGameplayActive && useTouchUI) {
+                    // Keep controlMode touch in background
+                } else if (controlMode === "touch") {
+                    controlMode = "mouse";
+                }
+                if (tcm) tcm.style.opacity = "1";
+            }
+        }
+        updateTouchUIVisibility();
+
+        /* ========== 横画面推奨メッセージ ========== */
+        let landscapeDismissed = false;
+        const landscapeWarning = document.getElementById("landscapeWarning");
+        const btnDismissLandscape = document.getElementById(
+            "btnDismissLandscape",
+        );
+
+        function checkOrientationWarning() {
+            if (landscapeDismissed || !isMobileDevice) return;
+            const isPortrait = window.innerHeight > window.innerWidth;
+            if (isPortrait && landscapeWarning) {
+                landscapeWarning.style.display = "flex";
+            } else if (landscapeWarning) {
+                landscapeWarning.style.display = "none";
+            }
+        }
+
+        if (btnDismissLandscape) {
+            btnDismissLandscape.addEventListener("click", () => {
+                landscapeDismissed = true;
+                landscapeWarning.style.display = "none";
+            });
+            btnDismissLandscape.addEventListener("touchstart", (e) => {
+                e.preventDefault();
+                landscapeDismissed = true;
+                landscapeWarning.style.display = "none";
+            });
+        }
+
+        window.addEventListener("resize", checkOrientationWarning);
+        window.addEventListener("orientationchange", () => {
+            setTimeout(checkOrientationWarning, 200);
+        });
+        checkOrientationWarning();
+
+        joystickArea.addEventListener("touchstart", (e) => {
+            e.preventDefault();
+            if (joystickActive) return;
+            const touch = e.changedTouches[0];
+            joystickTouchId = touch.identifier;
+            joystickActive = true;
+            joystickCenter = { x: touch.clientX, y: touch.clientY };
+            joystickBase.style.display = "block";
+            joystickBase.style.left = joystickCenter.x + "px";
+            joystickBase.style.top = joystickCenter.y + "px";
+            joystickNub.style.transform = `translate(-50%, -50%)`;
+        });
+
+        joystickArea.addEventListener(
+            "touchmove",
+            (e) => {
+                e.preventDefault();
+                if (!joystickActive) return;
+                for (let i = 0; i < e.changedTouches.length; i++) {
+                    const touch = e.changedTouches[i];
+                    if (touch.identifier === joystickTouchId) {
+                        let dx = touch.clientX - joystickCenter.x;
+                        let dy = touch.clientY - joystickCenter.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        const maxRadius = 60;
+                        if (dist > maxRadius) {
+                            dx = (dx / dist) * maxRadius;
+                            dy = (dy / dist) * maxRadius;
+                        }
+                        joystickNub.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+
+                        // Normalize vector (-1 to 1)
+                        joystickVector.x = dx / maxRadius;
+                        joystickVector.y = dy / maxRadius;
+
+                        // Map joystick coordinates to precise keys/angles
+                        keys["touch_aim"] = true;
+                        keys["touch_angle"] = Math.atan2(
+                            joystickVector.y,
+                            joystickVector.x,
+                        );
+                        keys["touch_thrust"] =
+                            Math.hypot(joystickVector.x, joystickVector.y) > 0.4;
+
+                        break;
+                    }
+                }
+            },
+            { passive: false },
+        );
+
+        function endJoystick(e) {
+            if (!joystickActive) return;
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                if (e.changedTouches[i].identifier === joystickTouchId) {
+                    joystickActive = false;
+                    joystickTouchId = null;
+                    joystickBase.style.display = "none";
+                    joystickVector = { x: 0, y: 0 };
+                    keys["touch_aim"] = false;
+                    keys["touch_thrust"] = false;
+                    break;
+                }
+            }
+        }
+        joystickArea.addEventListener("touchend", endJoystick);
+        joystickArea.addEventListener("touchcancel", endJoystick);
+
+        // Pinch to Zoom support
+        let initialPinchDistance = null;
+        let pinchBlocked = false;
+
+        function isTouchOnUI(touch) {
+            const el = document.elementFromPoint(touch.clientX, touch.clientY);
+            if (!el) return false;
+            return (
+                el.closest(
+                    "#touchUI, #joystickArea, #joystickBase, #touchBtns, .game-modal, #pauseSettingsMenu",
+                ) !== null
+            );
+        }
+
+        window.addEventListener(
+            "touchstart",
+            (e) => {
+                if (e.touches.length === 2) {
+                    // スティック/ボタン/設定画面上のタッチはブロック
+                    pinchBlocked = false;
+                    for (let i = 0; i < e.touches.length; i++) {
+                        if (isTouchOnUI(e.touches[i])) {
+                            pinchBlocked = true;
+                            break;
+                        }
+                    }
+                    if (!pinchBlocked && running) {
+                        let dx = e.touches[0].clientX - e.touches[1].clientX;
+                        let dy = e.touches[0].clientY - e.touches[1].clientY;
+                        initialPinchDistance = Math.hypot(dx, dy);
+                    } else {
+                        initialPinchDistance = null;
+                    }
+                }
+            },
+            { passive: false },
+        );
+
+        window.addEventListener(
+            "touchmove",
+            (e) => {
+                if (
+                    e.touches.length === 2 &&
+                    initialPinchDistance !== null &&
+                    !pinchBlocked
+                ) {
+                    e.preventDefault();
+                    let dx = e.touches[0].clientX - e.touches[1].clientX;
+                    let dy = e.touches[0].clientY - e.touches[1].clientY;
+                    let dist = Math.hypot(dx, dy);
+                    let diff = dist - initialPinchDistance;
+                    zoomLevel = Math.max(0.3, Math.min(zoomLevel + diff * 0.005, 3.0));
+                    initialPinchDistance = dist;
+                }
+            },
+            { passive: false },
+        );
+
+        window.addEventListener("touchend", (e) => {
+            if (e.touches.length < 2) {
+                initialPinchDistance = null;
+            }
+        });
+
+        function bindTouchBtn(id, mappedKeys) {
+            const btn = document.getElementById(id);
+            if (!btn) return;
+            btn.addEventListener("touchstart", (e) => {
+                e.preventDefault();
+                mappedKeys.forEach((k) => (keys[k] = true));
+            });
+            btn.addEventListener("touchend", (e) => {
+                e.preventDefault();
+                mappedKeys.forEach((k) => (keys[k] = false));
+            });
+            btn.addEventListener("touchcancel", (e) => {
+                e.preventDefault();
+                mappedKeys.forEach((k) => (keys[k] = false));
+            });
+        }
+        bindTouchBtn("btnTouchShoot", [" "]); // Space
+        bindTouchBtn("btnTouchBoost", ["shift"]);
+        bindTouchBtn("btnTouchBrake", ["s"]);
+        bindTouchBtn("btnTouchRollLeft", ["q"]);
+        bindTouchBtn("btnTouchRollRight", ["e"]);
+
+        const btnTouchPause = document.getElementById("btnTouchPause");
+        if (btnTouchPause) {
+            btnTouchPause.addEventListener(
+                "touchstart",
+                (e) => {
+                    e.preventDefault();
+                    if (running || isPaused) {
+                        if (isSettingsFromHome) {
+                            document.getElementById("pauseSettingsMenu").style.display =
+                                "none";
+                            document.getElementById("modeSelectModal").style.display =
+                                "block";
+                            isSettingsFromHome = false;
+                        } else {
+                            setPauseState(!isPaused);
+                        }
+                    }
+                },
+                { passive: false },
+            );
+        }
+
+        window.leaveMultiplayerRoom = function (showAlert = false, msg = "") {
+            if (hasDisconnectedAlertShown) return;
+            isLeavingRoom = true;
+            if (showAlert) {
+                hasDisconnectedAlertShown = true;
+                alert(msg);
+            }
+            running = false;
+            isPaused = false;
+            matchEnded = false;
+
+            if (photonClient && photonClient.isJoinedToRoom()) {
+                if (
+                    window.currentRoomDocId &&
+                    photonClient.myRoom().masterClientId ===
+                    photonClient.myActor().actorNr
+                ) {
+                    if (window.deleteFirestoreRoom)
+                        window.deleteFirestoreRoom(window.currentRoomDocId);
+                }
+                photonClient.leaveRoom();
+                photonClient.disconnect();
+            }
+            document
+                .querySelectorAll(".game-modal")
+                .forEach((m) => (m.style.display = "none"));
+            document.getElementById("pauseSettingsMenu").style.display = "none";
+            document.getElementById("modeSelectModal").style.display = "block";
+
+            resetGameBackground();
+
+            ctx.fillStyle = "#050510";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            if (showAlert)
+                setTimeout(() => {
+                    hasDisconnectedAlertShown = false;
+                }, 2000);
+            setTimeout(() => {
+                isLeavingRoom = false;
+            }, 1000);
+        };
+
+        function resetGameBackground() {
+            ships = [];
+            bullets = [];
+            particles = [];
+            asteroids = [];
+            floatingTexts = [];
+            powerups = [];
+        }
+
+        let bullets = [];
+        let particles = [];
+        let asteroids = [];
+        let ships = [];
+        let idGen = 2;
+        const playerId = 1;
+
+        /* ===== Photonのグローバル変数 & ルーム・チーム設定 ===== */
+        const PHOTON_APP_ID = "6fc63498-cd25-4e81-8d17-78a2ce1a54c8";
+        let photonClient = null;
+        window.isMultiplayer = false;
+        window.currentDifficulty = "normal"; // 'easy', 'normal', 'hard'
+        window.currentRoomSettings = {
+            asteroids: true,
+            playerHp: 250,
+            playerLives: 5,
+            activeTeams: 2,
+            spawns: {},
+            teams: {
+                1: { aiCount: 0, aiHp: 45, aiLives: 0, dropRate: 0.15 },
+                2: { aiCount: 0, aiHp: 45, aiLives: 0, dropRate: 0.15 },
+                3: { aiCount: 0, aiHp: 45, aiLives: 0, dropRate: 0.15 },
+                4: { aiCount: 0, aiHp: 45, aiLives: 0, dropRate: 0.15 },
+            },
+        };
+        let syncTimer = null;
+        const isRoomHost = () =>
+            photonClient &&
+            photonClient.isJoinedToRoom() &&
+            photonClient.myRoom().masterClientId === photonClient.myActor().actorNr;
+
+        function updatePhotonStatus(text) {
+            const el = document.getElementById("photonStatus");
+            if (el) el.innerText = text;
+        }
+
+        function updateRoomPlayerList() {
+            const list = document.getElementById("roomPlayerList");
+            if (!list || !photonClient || !photonClient.myRoomActors()) return;
+            list.innerHTML = "";
+            const actors = photonClient.myRoomActors();
+            for (let actorNr in actors) {
+                const actor = actors[actorNr];
+                const name = actor.getCustomProperty("name") || `PILOT ${actorNr}`;
+                const teamId = actor.getCustomProperty("team") || 1;
+                const color = TEAM_COLORS[teamId];
+                const li = document.createElement("li");
+                li.innerHTML = `<span style="color:${color};">[チーム ${teamId}] ${name} ${actor.isLocal ? "(あなた)" : ""}</span>`;
+                list.appendChild(li);
+            }
+        }
+
+        function updateTeamSelector() {
+            const ts = document.getElementById("teamSelector");
+            if (!ts) return;
+            ts.innerHTML = "";
+            const activeTeams = window.currentRoomSettings.activeTeams || 2;
+            for (let i = 1; i <= activeTeams; i++) {
+                const btn = document.createElement("button");
+                btn.className = `team-btn team-${i}`;
+                btn.innerText = `チーム ${i}`;
+                btn.onclick = () => window.selectTeam(i);
+                ts.appendChild(btn);
+            }
+            const myTeam = photonClient?.myActor()?.getCustomProperty("team") || 1;
+            window.selectTeam(myTeam);
+        }
+
+        function drawSpawnMap() {
+            const canvas = document.getElementById("spawnMap");
+            if (!canvas) return;
+            const ctx = canvas.getContext("2d");
+
+            // Canvasのサイズをスケールに合わせてセット（高解像度化）
+            const rect = canvas.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+                canvas.width = rect.width * dpr;
+                canvas.height = rect.height * dpr;
+            } else {
+                canvas.width = 240 * dpr;
+                canvas.height = 240 * dpr;
+            }
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (photonClient && photonClient.isJoinedToRoom()) {
+                const actors = photonClient.myRoomActors();
+                for (let id in actors) {
+                    const act = actors[id];
+
+                    // スポーン位置をホストの設定（spawns）または本人のカスタムプロパティから取得
+                    let px =
+                        act.getCustomProperty("spawnX") !== undefined
+                            ? act.getCustomProperty("spawnX")
+                            : WORLD_W / 2;
+                    let py =
+                        act.getCustomProperty("spawnY") !== undefined
+                            ? act.getCustomProperty("spawnY")
+                            : WORLD_H / 2;
+
+                    if (
+                        window.currentRoomSettings.spawns &&
+                        window.currentRoomSettings.spawns[id]
+                    ) {
+                        px = window.currentRoomSettings.spawns[id].x;
+                        py = window.currentRoomSettings.spawns[id].y;
+                    }
+
+                    const team = act.getCustomProperty("team") || 1;
+                    const cx = (px / WORLD_W) * canvas.width;
+                    const cy = (py / WORLD_H) * canvas.height;
+
+                    ctx.fillStyle = TEAM_COLORS[team] || "#fff";
+                    ctx.beginPath();
+                    ctx.arc(cx, cy, (act.isLocal ? 8 : 6) * dpr, 0, Math.PI * 2);
+                    ctx.fill();
+                    if (act.isLocal) {
+                        ctx.strokeStyle = "#fff";
+                        ctx.lineWidth = 2 * dpr;
+                        ctx.stroke();
+                        ctx.fillStyle = "#fff";
+                        ctx.font = `${10 * dpr}px monospace`;
+                        ctx.fillText("YOU", cx + 10 * dpr, cy + 4 * dpr);
+                    } else {
+                        const name = act.getCustomProperty("name") || `P${id}`;
+                        ctx.fillStyle = "rgba(255,255,255,0.7)";
+                        ctx.font = `${9 * dpr}px monospace`;
+                        ctx.fillText(name.substring(0, 6), cx + 8 * dpr, cy + 3 * dpr);
+                    }
+                }
+            }
+        }
+
+        // ホスト専用のドラッグ機能の実装
+        let draggedActorNr = null;
+        const spawnMapCanvas = document.getElementById("spawnMap");
+        if (spawnMapCanvas) {
+            spawnMapCanvas.addEventListener("mousedown", (e) => {
+                if (!isRoomHost() || !photonClient || !photonClient.isJoinedToRoom())
+                    return;
+                const rect = spawnMapCanvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+
+                let bestDist = 20; // ピクセル範囲内で一番近いピンを掴む
+                let bestActor = null;
+
+                const actors = photonClient.myRoomActors();
+                for (let id in actors) {
+                    const act = actors[id];
+                    let px = act.getCustomProperty("spawnX") || WORLD_W / 2;
+                    let py = act.getCustomProperty("spawnY") || WORLD_H / 2;
+                    if (
+                        window.currentRoomSettings.spawns &&
+                        window.currentRoomSettings.spawns[id]
+                    ) {
+                        px = window.currentRoomSettings.spawns[id].x;
+                        py = window.currentRoomSettings.spawns[id].y;
+                    }
+                    const cx = (px / WORLD_W) * rect.width;
+                    const cy = (py / WORLD_H) * rect.height;
+                    const dist = Math.hypot(cx - x, cy - y);
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        bestActor = id;
+                    }
+                }
+                if (bestActor) draggedActorNr = bestActor;
+            });
+
+            spawnMapCanvas.addEventListener("mousemove", (e) => {
+                if (!draggedActorNr || !isRoomHost() || !photonClient) return;
+                const rect = spawnMapCanvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+
+                const worldX = Math.max(
+                    0,
+                    Math.min(WORLD_W, (x / rect.width) * WORLD_W),
+                );
+                const worldY = Math.max(
+                    0,
+                    Math.min(WORLD_H, (y / rect.height) * WORLD_H),
+                );
+
+                if (!window.currentRoomSettings.spawns)
+                    window.currentRoomSettings.spawns = {};
+                window.currentRoomSettings.spawns[draggedActorNr] = {
+                    x: worldX,
+                    y: worldY,
+                };
+
+                drawSpawnMap();
+            });
+
+            const endDrag = () => {
+                if (draggedActorNr && isRoomHost()) {
+                    draggedActorNr = null;
+                    photonClient.raiseEvent(5, window.currentRoomSettings, {
+                        receivers: Photon.LoadBalancing.Constants.ReceiverGroup.Others,
+                    });
+                }
+            };
+            spawnMapCanvas.addEventListener("mouseup", endDrag);
+            spawnMapCanvas.addEventListener("mouseleave", endDrag);
+        }
+
+        window.selectTeam = function (teamId) {
+            if (photonClient && photonClient.isJoinedToRoom()) {
+                photonClient.myActor().setCustomProperty("team", teamId);
+            }
+            document
+                .querySelectorAll(".team-btn")
+                .forEach((b) => b.classList.remove("team-active"));
+            document.querySelector(`.team-${teamId}`)?.classList.add("team-active");
+            drawSpawnMap();
+            updateRoomPlayerList();
+        };
+
+        document.getElementById("btnAddTeam")?.addEventListener("click", () => {
+            if (window.currentRoomSettings.activeTeams < 4) {
+                window.currentRoomSettings.activeTeams++;
+                updateTeamSelector();
+                if (photonClient && photonClient.isJoinedToRoom()) {
+                    photonClient.raiseEvent(5, window.currentRoomSettings, {
+                        receivers: Photon.LoadBalancing.Constants.ReceiverGroup.Others,
+                    });
+                }
+            }
+        });
+
+        document
+            .getElementById("btnRemoveTeam")
+            ?.addEventListener("click", () => {
+                if (window.currentRoomSettings.activeTeams > 2) {
+                    window.currentRoomSettings.activeTeams--;
+
+                    if (photonClient && photonClient.isJoinedToRoom()) {
+                        const myTeam =
+                            photonClient.myActor().getCustomProperty("team") || 1;
+                        if (myTeam > window.currentRoomSettings.activeTeams) {
+                            window.selectTeam(1);
+                        }
+                    }
+
+                    updateTeamSelector();
+                    if (photonClient && photonClient.isJoinedToRoom()) {
+                        photonClient.raiseEvent(5, window.currentRoomSettings, {
+                            receivers: Photon.LoadBalancing.Constants.ReceiverGroup.Others,
+                        });
+                    }
+                }
+            });
+
+        function renderTeamSettings() {
+            const container = document.getElementById("teamSettingsContainer");
+            if (!container) return;
+            container.innerHTML = "";
+            const activeTeams = window.currentRoomSettings.activeTeams || 2;
+            for (let i = 1; i <= activeTeams; i++) {
+                const t = window.currentRoomSettings.teams[i] || {
+                    aiCount: 0,
+                    aiHp: 45,
+                    aiLives: 0,
+                    dropRate: 0.15,
+                };
+                container.innerHTML += `
+        <div style="margin-bottom:12px; border-bottom:1px dashed rgba(0,240,255,0.2); padding-bottom:12px;">
+            <strong style="color:${TEAM_COLORS[i]}; font-size: 14px;">チーム ${i}</strong><br>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px;">
+                <span style="font-size: 13px;">味方AIのスポーン数:</span>
+                <input type="number" id="ts_count_${i}" value="${t.aiCount}" min="0" max="20" style="width:70px;">
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-size: 13px;">味方AIの最大HP (Life):</span>
+                <input type="number" id="ts_hp_${i}" value="${t.aiHp}" min="10" max="1000" style="width:70px;">
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-size: 13px;">味方AIの残機 (Lives):</span>
+                <input type="number" id="ts_lives_${i}" value="${t.aiLives !== undefined ? t.aiLives : 0}" min="0" max="100" style="width:70px;">
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-size: 13px;">アイテムドロップ確率:</span>
+                <input type="number" id="ts_drop_${i}" value="${t.dropRate}" step="0.05" min="0" max="1" style="width:70px;">
+            </div>
+        </div>`;
+            }
+        }
+
+        document
+            .getElementById("btnOpenRoomSettings")
+            ?.addEventListener("click", () => {
+                document.getElementById("settingAsteroids").checked =
+                    window.currentRoomSettings.asteroids !== false;
+                document.getElementById("settingMapSize").value =
+                    window.currentRoomSettings.mapSize || 10000;
+                document.getElementById("settingPlayerHp").value =
+                    window.currentRoomSettings.playerHp || 250;
+                document.getElementById("settingPlayerLives").value =
+                    window.currentRoomSettings.playerLives !== undefined
+                        ? window.currentRoomSettings.playerLives
+                        : 5;
+                renderTeamSettings();
+                document.getElementById("roomSettingsModal").style.display = "block";
+            });
+
+        document
+            .getElementById("btnApplyRoomSettings")
+            ?.addEventListener("click", () => {
+                window.currentRoomSettings.asteroids =
+                    document.getElementById("settingAsteroids").checked;
+                window.currentRoomSettings.mapSize =
+                    parseInt(document.getElementById("settingMapSize").value) || 10000;
+                WORLD_W = window.currentRoomSettings.mapSize;
+                WORLD_H = window.currentRoomSettings.mapSize;
+                window.currentRoomSettings.playerHp =
+                    parseInt(document.getElementById("settingPlayerHp").value) || 250;
+                window.currentRoomSettings.playerLives =
+                    parseInt(document.getElementById("settingPlayerLives").value) || 0;
+                const activeTeams = window.currentRoomSettings.activeTeams || 2;
+                for (let i = 1; i <= activeTeams; i++) {
+                    window.currentRoomSettings.teams[i] = {
+                        aiCount:
+                            parseInt(document.getElementById(`ts_count_${i}`).value) || 0,
+                        aiHp: parseInt(document.getElementById(`ts_hp_${i}`).value) || 45,
+                        aiLives:
+                            parseInt(document.getElementById(`ts_lives_${i}`).value) || 0,
+                        dropRate:
+                            parseFloat(document.getElementById(`ts_drop_${i}`).value) ||
+                            0.15,
+                    };
+                }
+                document.getElementById("roomSettingsModal").style.display = "none";
+                if (photonClient && photonClient.isJoinedToRoom()) {
+                    photonClient.raiseEvent(5, window.currentRoomSettings, {
+                        receivers: Photon.LoadBalancing.Constants.ReceiverGroup.Others,
+                    });
+                }
+            });
+
+        window.connectToPhoton = function (roomId, isHost) {
+            if (typeof Photon === "undefined") {
+                alert("Photon SDK not loaded.");
+                return;
+            }
+            updatePhotonStatus("通信を確立中...");
+            photonClient = new Photon.LoadBalancing.LoadBalancingClient(
+                Photon.ConnectionProtocol.Wss,
+                PHOTON_APP_ID,
+                "1.0",
+            );
+
+            photonClient.onStateChange = function (state) {
+                if (
+                    state === Photon.LoadBalancing.LoadBalancingClient.State.JoinedLobby
+                ) {
+                    updatePhotonStatus("ルームに参加中...");
+                    if (isHost) photonClient.createRoom(roomId, { maxPlayers: 10 });
+                    else photonClient.joinRoom(roomId);
+                } else if (
+                    state === Photon.LoadBalancing.LoadBalancingClient.State.Joined
+                ) {
+                    updatePhotonStatus("ルームに接続完了");
+                    setTimeout(() => updatePhotonStatus(""), 3000);
+                    window.isMultiplayer = true;
+                    document.getElementById("lobbyModal").style.display = "none";
+                    document.getElementById("roomWaitModal").style.display = "block";
+                    document.getElementById("hudHintText").innerText =
+                        "(P=ポーズ/メニュー, H=ヘルプ)";
+
+                    photonClient
+                        .myActor()
+                        .setCustomProperty(
+                            "name",
+                            localStorage.getItem("playerNickname_v1") || "Pilot",
+                        );
+                    photonClient.myActor().setCustomProperty("team", 1);
+
+                    // ランダム初期位置
+                    let mySpawnX = randInt(100, WORLD_W - 100);
+                    let mySpawnY = randInt(100, WORLD_H - 100);
+                    photonClient.myActor().setCustomProperty("spawnX", mySpawnX);
+                    photonClient.myActor().setCustomProperty("spawnY", mySpawnY);
+
+                    const hostFlag = isRoomHost();
+                    document.getElementById("btnStartGame").style.display = hostFlag
+                        ? "block"
+                        : "none";
+                    const btnOpenTeam = document.getElementById("btnOpenRoomSettings");
+                    if (btnOpenTeam)
+                        btnOpenTeam.style.display = hostFlag ? "inline-block" : "none";
+                    document.getElementById("btnAddTeam").style.display = hostFlag
+                        ? "inline-block"
+                        : "none";
+                    document.getElementById("btnRemoveTeam").style.display = hostFlag
+                        ? "inline-block"
+                        : "none";
+
+                    // カーソルをホストかそれ以外かで分かりやすくする
+                    document.getElementById("spawnMap").style.cursor = hostFlag
+                        ? "crosshair"
+                        : "default";
+
+                    updateTeamSelector();
+                    updateRoomPlayerList();
+                    setTimeout(drawSpawnMap, 100); // UIレンダリング待ち
+                }
+            };
+
+            photonClient.onActorJoin = function (actor) {
+                updateRoomPlayerList();
+                drawSpawnMap();
+                if (isRoomHost()) {
+                    photonClient.raiseEvent(5, window.currentRoomSettings, {
+                        receivers: Photon.LoadBalancing.Constants.ReceiverGroup.Others,
+                    });
+                }
+            };
+
+            photonClient.onActorLeave = function (actor) {
+                const name =
+                    actor.getCustomProperty("name") || `PILOT ${actor.actorNr}`;
+                updatePhotonStatus(`⚠ ${name} が通信を切断しました`);
+                setTimeout(() => updatePhotonStatus(""), 3000);
+
+                // ホスト切断時
+                if (!isLeavingRoom && (actor.isMasterClient || actor.actorNr === 1)) {
+                    if (matchEnded) {
+                        alert("ホストの接続が切断されました。");
+                    } else {
+                        window.leaveMultiplayerRoom(
+                            true,
+                            "ホストの接続が切断されました。ホーム画面に戻ります。",
+                        );
+                    }
+                    return;
+                }
+
+                if (window.isMultiplayer && running && !matchEnded) {
+                    const idx = ships.findIndex(
+                        (s) => s.id === "player_" + actor.actorNr,
+                    );
+                    if (idx !== -1) {
+                        if (!ships[idx].isGhost) {
+                            spawnExplosion(ships[idx].x, ships[idx].y, 20, 1.5, "large");
+                            spawnSmoke(ships[idx].x, ships[idx].y, 20, 4.0);
+                        }
+                        ships[idx].alive = false;
+                    }
+                } else {
+                    updateRoomPlayerList();
+                    drawSpawnMap();
+                }
+            };
+
+            photonClient.onActorPropertiesChange = function (actor) {
+                updateRoomPlayerList();
+                drawSpawnMap();
+
+                let enemy = ships.find((s) => s.id === "player_" + actor.actorNr);
+                if (enemy) {
+                    enemy.team = actor.getCustomProperty("team") || 1;
+                }
+            };
+
+            photonClient.onEvent = function (code, content, actorNr) {
+                if (code === 1) {
+                    // 位置同期
+                    let enemy = ships.find((s) => s.id === "player_" + actorNr);
+                    if (!enemy) {
+                        const aInfo = photonClient.myRoomActors()[actorNr];
+                        const eTeam = aInfo ? aInfo.getCustomProperty("team") || 1 : 1;
+                        enemy = {
+                            id: "player_" + actorNr,
+                            faction: "player",
+                            team: eTeam,
+                            isRemotePlayer: true,
+                            x: content.x,
+                            y: content.y,
+                            targetX: content.x,
+                            targetY: content.y,
+                            vx: content.vx || 0,
+                            vy: content.vy || 0,
+                            angle: content.a,
+                            targetAngle: content.a,
+                            turnSpeed: 0.1,
+                            thrust: 0.1,
+                            maxSpeed: 6,
+                            drag: 0.005,
+                            alive: true,
+                            hp: content.hp || 250,
+                            maxHp: 250,
+                            rollPhase: 0,
+                            weaponTimer: 0,
+                            weaponType: 0,
+                            ai: null,
+                            isGhost: content.hp <= 0,
+                            lives: content.l || 0,
+                        };
+                        ships.push(enemy);
+                    } else {
+                        enemy.targetX = content.x;
+                        enemy.targetY = content.y;
+                        enemy.targetAngle = content.a;
+                        if (content.vx !== undefined) enemy.vx = content.vx;
+                        if (content.vy !== undefined) enemy.vy = content.vy;
+                        enemy.team = content.t !== undefined ? content.t : enemy.team;
+                        if (content.l !== undefined) enemy.lives = content.l;
+                        if (content.hp !== undefined) {
+                            if (enemy.isGhost && content.hp > 0) {
+                                enemy.isGhost = false;
+                                enemy.alive = true;
+                                enemy.x = content.x;
+                                enemy.y = content.y;
+                            }
+                            enemy.hp = content.hp;
+                            if (enemy.hp <= 0 && !enemy.isGhost) {
+                                enemy.isGhost = true;
+                                if (enemy.alive) {
+                                    spawnExplosion(enemy.x, enemy.y, 28, 2.2, "large");
+                                    spawnSmoke(enemy.x, enemy.y, 20, 4.0);
+                                }
+                            }
+                        }
+                    }
+                } else if (code === 2) {
+                    // 射撃同期
+                    const shooterId = content.id ? content.id : "player_" + actorNr;
+                    let shooter = ships.find((s) => s.id === shooterId);
+                    if (shooter && !shooter.isGhost) {
+                        if (shooter.isRemotePlayer || shooter.isRemoteAI) {
+                            shooter.targetX = content.x;
+                            shooter.targetY = content.y;
+                            shooter.targetAngle = content.a;
+                        } else {
+                            shooter.x = content.x;
+                            shooter.y = content.y;
+                            shooter.angle = content.a;
+                        }
+                        shooter.weaponType = content.type;
+                        fireBullet(shooter, 47, 7.5, 0.5, true);
+                    }
+                } else if (code === 3) {
+                    // 撃破イベント
+                    const deadPlayer = ships.find(
+                        (s) => s.id === "player_" + content.deadActorNr,
+                    );
+                    if (deadPlayer && !deadPlayer.isGhost) {
+                        spawnExplosion(deadPlayer.x, deadPlayer.y, 28, 2.2, "large");
+                        spawnSmoke(deadPlayer.x, deadPlayer.y, 20, 4.0);
+                        deadPlayer.isGhost = true;
+                        deadPlayer.hp = 0;
+                    }
+                } else if (code === 4) {
+                    // ゲーム開始命令
+                    startCountdownAndPlay(content);
+                } else if (code === 5) {
+                    // 設定同期
+                    window.currentRoomSettings = content;
+                    if (content.mapSize) {
+                        WORLD_W = content.mapSize;
+                        WORLD_H = content.mapSize;
+                    }
+                    updateTeamSelector();
+                    drawSpawnMap();
+                } else if (code === 6) {
+                    // AI座標同期
+                    content.forEach((data) => {
+                        let aiShip = ships.find((s) => s.id === data.id);
+                        if (!aiShip) {
+                            aiShip = makeAIShip("ai");
+                            aiShip.id = data.id;
+                            aiShip.isRemoteAI = true;
+                            aiShip.team = data.team;
+                            aiShip.x = data.x;
+                            aiShip.y = data.y;
+                            aiShip.angle = data.a;
+                            aiShip.targetX = data.x;
+                            aiShip.targetY = data.y;
+                            aiShip.targetAngle = data.a;
+                            aiShip.vx = data.vx || 0;
+                            aiShip.vy = data.vy || 0;
+                            aiShip.maxHp = data.mHp || 45;
+                            aiShip.hp = data.hp || aiShip.maxHp;
+                            aiShip.lives = data.l !== undefined ? data.l : 0;
+                            ships.push(aiShip);
+                        } else {
+                            aiShip.targetX = data.x;
+                            aiShip.targetY = data.y;
+                            aiShip.targetAngle = data.a;
+                            if (data.vx !== undefined) aiShip.vx = data.vx;
+                            if (data.vy !== undefined) aiShip.vy = data.vy;
+                            aiShip.team = data.team;
+                            if (data.l !== undefined) aiShip.lives = data.l;
+
+                            if (!aiShip.alive && data.hp > 0) {
+                                aiShip.alive = true;
+                                aiShip.isGhost = false;
+                                aiShip.x = data.x;
+                                aiShip.y = data.y;
+                            }
+
+                            aiShip.hp = data.hp;
+                            if (aiShip.hp <= 0 && aiShip.alive) {
+                                aiShip.alive = false;
+                                spawnExplosion(aiShip.x, aiShip.y, 28, 2.2, "large");
+                                spawnSmoke(aiShip.x, aiShip.y, 20, 4.0);
+                            }
+                        }
+                    });
+                } else if (code === 8) {
+                    // アステロイド初期化
+                    asteroids = content.map((a) => ({ ...a }));
+                }
+            };
+
+            photonClient.connectToRegionMaster("jp");
+        };
+
+        function startCountdownAndPlay(settings) {
+            document.getElementById("roomWaitModal").style.display = "none";
+            const cdUI = document.getElementById("countdownUI");
+            cdUI.style.display = "block";
+
+            let count = 3;
+            cdUI.innerText = count;
+            cdUI.style.color = "#00f0ff";
+            cdUI.style.fontSize = "100px";
+            try {
+                playLaserSound();
+            } catch (e) { }
+
+            const iv = setInterval(() => {
+                count--;
+                if (count > 0) {
+                    cdUI.innerText = count;
+                    try {
+                        playLaserSound();
+                    } catch (e) { }
+                } else {
+                    clearInterval(iv);
+                    cdUI.innerText = "START!";
+                    try {
+                        playExplosionSound("small");
+                    } catch (e) { }
+                    setTimeout(() => {
+                        cdUI.style.display = "none";
+                    }, 1000);
+
+                    window.isMultiplayer = true;
+                    window.currentRoomSettings = settings;
+                    initGame();
+                }
+            }, 1000);
+        }
+
+        function startSinglePlayerCountdown() {
+            document.getElementById("modeSelectModal").style.display = "none";
+            const cdUI = document.getElementById("countdownUI");
+            cdUI.style.display = "block";
+
+            let count = 3;
+            cdUI.innerText = count;
+            cdUI.style.color = "#00f0ff";
+            cdUI.style.fontSize = "100px";
+            try {
+                playLaserSound();
+            } catch (e) { }
+
+            const iv = setInterval(() => {
+                count--;
+                if (count > 0) {
+                    cdUI.innerText = count;
+                    try {
+                        playLaserSound();
+                    } catch (e) { }
+                } else {
+                    clearInterval(iv);
+                    cdUI.innerText = "START!";
+                    try {
+                        playExplosionSound("small");
+                    } catch (e) { }
+                    setTimeout(() => {
+                        cdUI.style.display = "none";
+                    }, 1000);
+
+                    window.isMultiplayer = false;
+                    window._testPlayMode = false;
+                    initGame();
+                }
+            }, 1000);
+        }
+
+        /* ========== 初期化 ========== */
+        function initGame() {
+            bullets = [];
+            particles = [];
+            asteroids = [];
+            ships = [];
+            floatingTexts = [];
+            powerups = [];
+            cameraShake = 0;
+            idGen = 2;
+            wave = 1;
+            score = 0;
+            powerupsEnabled = true;
+            message = window.isMultiplayer
+                ? "TEAM DEATHMATCH: 生き残れ"
+                : "敵を破壊してスコアを稼げ";
+            showHelp = false;
+            gameOverMode = false;
+            matchEnded = false;
+            isPaused = false;
+            document.getElementById("pauseSettingsMenu").style.display = "none";
+
+            if (controlMode === "initial") {
+                resumeAudioOnFirstGesture();
+            }
+
+            // 自分のスポーン情報
+            const mTeam =
+                window.isMultiplayer && photonClient
+                    ? photonClient.myActor().getCustomProperty("team") || 1
+                    : 1;
+            let mX = WORLD_W / 2;
+            let mY = WORLD_H / 2;
+
+            if (window.isMultiplayer && photonClient) {
+                const myActorNr = photonClient.myActor().actorNr;
+                if (
+                    window.currentRoomSettings.spawns &&
+                    window.currentRoomSettings.spawns[myActorNr]
+                ) {
+                    mX = window.currentRoomSettings.spawns[myActorNr].x;
+                    mY = window.currentRoomSettings.spawns[myActorNr].y;
+                } else {
+                    mX =
+                        photonClient.myActor().getCustomProperty("spawnX") || WORLD_W / 2;
+                    mY =
+                        photonClient.myActor().getCustomProperty("spawnY") || WORLD_H / 2;
+                }
+            }
+
+            const spawnOffsetX = window.isMultiplayer ? rand(-50, 50) : 0;
+            const spawnOffsetY = window.isMultiplayer ? rand(-50, 50) : 0;
+
+            const initPlayerHp = window.isMultiplayer
+                ? window.currentRoomSettings.playerHp || 250
+                : 250;
+            const initPlayerLives = window.isMultiplayer
+                ? window.currentRoomSettings.playerLives !== undefined
+                    ? window.currentRoomSettings.playerLives
+                    : 5
+                : 3;
+            lives = initPlayerLives;
+
+            const player = {
+                id: playerId,
+                faction: "player",
+                team: mTeam,
+                x: mX + spawnOffsetX,
+                y: mY + spawnOffsetY,
+                vx: 0,
+                vy: 0,
+                angle: -Math.PI / 2,
+                turnSpeed: 0.07,
+                thrust: 0.12,
+                maxSpeed: 6,
+                drag: 0.005,
+                heat: 0,
+                maxHeat: 100,
+                boosting: false,
+                boostTimer: 0,
+                shootCd: 100,
+                shootTimer: 0,
+                alive: true,
+                isGhost: false,
+                hp: initPlayerHp,
+                maxHp: initPlayerHp,
+                scoreValue: 0,
+                rollPhase: 0,
+                ai: null,
+                weaponType: 0,
+                weaponTimer: 0,
+            };
+            ships.push(player);
+
+            if (!window.isMultiplayer) {
+                document.getElementById("hudHintText").innerText =
+                    "(P=ポーズ/メニュー, R=戻る, H=ヘルプ)";
+                spawnAsteroids(20);
+                spawnEnemyWave(1);
+            } else {
+                matchStartTime = performance.now();
+                if (isRoomHost()) {
+                    if (
+                        window.currentRoomSettings &&
+                        window.currentRoomSettings.asteroids
+                    ) {
+                        spawnAsteroids(40);
+                        const astData = asteroids.map((a) => ({
+                            x: a.x,
+                            y: a.y,
+                            vx: a.vx,
+                            vy: a.vy,
+                            r: a.r,
+                            hp: a.hp,
+                            rot: a.rot,
+                            rotv: a.rotv,
+                            spikes: a.spikes,
+                            offsets: a.offsets,
+                        }));
+                        photonClient.raiseEvent(8, astData, {
+                            receivers: Photon.LoadBalancing.Constants.ReceiverGroup.Others,
+                            cachingOption:
+                                Photon.LoadBalancing.Constants.EventCaching.AddToRoomCache,
+                        });
+                    }
+                    const activeTeams = window.currentRoomSettings.activeTeams || 2;
+                    for (let i = 1; i <= activeTeams; i++) {
+                        const tConf = window.currentRoomSettings.teams[i];
+                        if (tConf && tConf.aiCount > 0) {
+                            const pSpawns = [];
+                            const actors = photonClient.myRoomActors();
+                            for (let aId in actors) {
+                                if (actors[aId].getCustomProperty("team") === i) {
+                                    let px =
+                                        actors[aId].getCustomProperty("spawnX") || WORLD_W / 2;
+                                    let py =
+                                        actors[aId].getCustomProperty("spawnY") || WORLD_H / 2;
+                                    if (
+                                        window.currentRoomSettings.spawns &&
+                                        window.currentRoomSettings.spawns[aId]
+                                    ) {
+                                        px = window.currentRoomSettings.spawns[aId].x;
+                                        py = window.currentRoomSettings.spawns[aId].y;
+                                    }
+                                    pSpawns.push({ x: px, y: py });
+                                }
+                            }
+
+                            for (let j = 0; j < tConf.aiCount; j++) {
+                                const ai = makeAIShip("ai");
+                                ai.team = i;
+                                ai.hp = tConf.aiHp;
+                                ai.maxHp = tConf.aiHp;
+                                ai.lives = tConf.aiLives !== undefined ? tConf.aiLives : 0;
+                                ai.dropRate = tConf.dropRate;
+
+                                if (pSpawns.length > 0) {
+                                    const base = pSpawns[randInt(0, pSpawns.length - 1)];
+                                    ai.x = wrap(base.x + rand(-300, 300), WORLD_W);
+                                    ai.y = wrap(base.y + rand(-300, 300), WORLD_H);
+                                } else {
+                                    ai.x = rand(0, WORLD_W);
+                                    ai.y = rand(0, WORLD_H);
+                                }
+                                ships.push(ai);
+                            }
+                        }
+                    }
+                }
+
+                if (syncTimer) clearInterval(syncTimer);
+                syncTimer = setInterval(() => {
+                    if (
+                        window.isMultiplayer &&
+                        running &&
+                        !isPaused &&
+                        photonClient &&
+                        photonClient.isJoinedToRoom()
+                    ) {
+                        const p = ships.find((s) => s.id === playerId);
+                        if (p) {
+                            photonClient.raiseEvent(
+                                1,
+                                {
+                                    x: p.x,
+                                    y: p.y,
+                                    vx: p.vx,
+                                    vy: p.vy,
+                                    a: p.angle,
+                                    hp: p.hp,
+                                    t: p.team,
+                                    l: lives,
+                                },
+                                {
+                                    receivers:
+                                        Photon.LoadBalancing.Constants.ReceiverGroup.Others,
+                                },
+                            );
+                        }
+                        if (isRoomHost()) {
+                            const aiData = ships
+                                .filter(
+                                    (s) => s.ai && !s.isRemoteAI && (s.alive || s.lives > 0),
+                                )
+                                .map((s) => ({
+                                    id: s.id,
+                                    x: s.x,
+                                    y: s.y,
+                                    vx: s.vx,
+                                    vy: s.vy,
+                                    a: s.angle,
+                                    hp: s.hp,
+                                    f: s.faction,
+                                    team: s.team,
+                                    mHp: s.maxHp,
+                                    l: s.lives,
+                                }));
+                            if (aiData.length > 0)
+                                photonClient.raiseEvent(6, aiData, {
+                                    receivers:
+                                        Photon.LoadBalancing.Constants.ReceiverGroup.Others,
+                                });
+                        }
+                    }
+                }, 20); // Increased sync rate to 50Hz
+            }
+            running = true;
+            updateTouchUIVisibility();
+        }
+
+        /* ========== エンティティ生成 ========== */
+        function makeAIShip(faction) {
+            const id = idGen++;
+            let team = 2; // デフォルト敵
+            if (faction === "ally") team = window.isMultiplayer ? 1 : 3;
+            const diff = window.isMultiplayer ? "normal" : window.currentDifficulty;
+
+            // 難易度別ステータス
+            let turnSpd = 0.1,
+                thrustVal = 0.1,
+                maxSpd = 5.5,
+                shootCdVal = 140,
+                thinkMin = 0.5,
+                thinkMax = 2.0;
+            if (diff === "easy") {
+                turnSpd = 0.08;
+                thrustVal = 0.08;
+                maxSpd = 5.0;
+                shootCdVal = 200;
+                thinkMin = 1.0;
+                thinkMax = 2.5;
+            } else if (diff === "hard") {
+                turnSpd = 0.14;
+                thrustVal = 0.14;
+                maxSpd = 6.2;
+                shootCdVal = 85;
+                thinkMin = 0.15;
+                thinkMax = 0.6;
+            }
+            if (faction === "enemy") turnSpd += diff === "hard" ? 0.03 : 0.02;
+
+            return {
+                id,
+                faction,
+                team,
+                x: rand(0, WORLD_W),
+                y: rand(0, WORLD_H),
+                vx: rand(-1, 1),
+                vy: rand(-1, 1),
+                angle: rand(0, TAU),
+                turnSpeed: turnSpd,
+                thrust: thrustVal,
+                maxSpeed: maxSpd,
+                drag: 0.004,
+                heat: 0,
+                maxHeat: 100,
+                boosting: false,
+                boostTimer: 0,
+                shootCd: shootCdVal,
+                shootTimer: 0,
+                alive: true,
+                isGhost: false,
+                hp: 45,
+                maxHp: 45,
+                scoreValue: faction === "enemy" ? 150 : 0,
+                dropRate: 0.15,
+                lives: 0,
+                ai: {
+                    mode: "patrol",
+                    targetId: null,
+                    thinkTimer: rand(thinkMin, thinkMax),
+                    formation: rand(-1, 1),
+                    fleeing: false,
+                    difficulty: diff,
+                },
+                rollPhase: 0,
+            };
+        }
+        function spawnAsteroids(n) {
+            const spawnCount = lightweightMode ? Math.max(6, Math.floor(n * 1)) : n;
+            for (let i = 0; i < spawnCount; i++) {
+                const r = rand(22, 60);
+                const spikes = randInt(8, 14);
+                const offsets = [];
+                for (let j = 0; j < spikes; j++) offsets.push(rand(0.5, 1.2));
+                asteroids.push({
+                    x: rand(0, WORLD_W),
+                    y: rand(0, WORLD_H),
+                    vx: rand(-1.2, 1.2),
+                    vy: rand(-1.2, 1.2),
+                    r,
+                    hp: Math.floor(r / 10),
+                    rot: rand(0, TAU),
+                    rotv: rand(-0.01, 0.01),
+                    spikes,
+                    offsets,
+                });
+            }
+        }
+        function splitAsteroid(a) {
+            if (a.r < 22) return;
+            for (let i = 0; i < 2; i++) {
+                const r = a.r * rand(0.45, 0.6);
+                const spikes = randInt(7, 12);
+                const offsets = [];
+                for (let j = 0; j < spikes; j++) offsets.push(rand(0.5, 1.2));
+                asteroids.push({
+                    x: wrap(a.x + rand(-5, 5), WORLD_W),
+                    y: wrap(a.y + rand(-5, 5), WORLD_H),
+                    vx: a.vx + rand(-1, 1),
+                    vy: a.vy + rand(-1, 1),
+                    r,
+                    hp: Math.max(1, Math.floor(r / 10)),
+                    rot: rand(0, TAU),
+                    rotv: rand(-0.02, 0.02),
+                    spikes,
+                    offsets,
+                });
+            }
+        }
+        function spawnEnemyWave(n) {
+            const count = Math.min(4 + n, 6);
+            for (let i = 0; i < count; i++) {
+                const s = makeAIShip("enemy");
+                s.x = rand(0, WORLD_W);
+                s.y = rand(0, WORLD_H);
+                ships.push(s);
+            }
+            for (let i = 0; i < count; i++) {
+                const a = makeAIShip("ally");
+                a.x = rand(0, WORLD_W);
+                a.y = rand(0, WORLD_H);
+                ships.push(a);
+            }
+        }
+        function spawnWave(enemyCount, allyCount) {
+            for (let i = 0; i < Math.max(0, enemyCount); i++) {
+                const s = makeAIShip("enemy");
+                ships.push(s);
+            }
+            for (let i = 0; i < Math.max(0, allyCount); i++) {
+                const a = makeAIShip("ally");
+                ships.push(a);
+            }
+        }
+
+        /* ========== 弾・エフェクト ========== */
+        function fireBulletBase(
+            s,
+            speed,
+            _life,
+            spread,
+            angleOffset = 0,
+            colorType = "laser",
+            isRemote = false,
+        ) {
+            const ang = s.angle + angleOffset + rand(-spread, spread) * 0.1;
+            const ca = Math.cos(ang),
+                sa = Math.sin(ang);
+            bullets.push({
+                x: wrap(s.x + ca * 16, WORLD_W),
+                y: wrap(s.y + sa * 16, WORLD_H),
+                vx: s.vx + ca * speed,
+                vy: s.vy + sa * speed,
+                life: 5.0,
+                owner: s.id,
+                ownerTeam: s.team,
+                radius: 3,
+                type: colorType,
+                length: 48,
+                width: 3,
+            });
+            spawnExplosion(s.x + ca * 18, s.y + sa * 18, 4, 0.4);
+        }
+        function fireBullet(s, speed, _life, spread, isRemote = false) {
+            if (s.isGhost) return;
+            try {
+                playLaserSound(s.x, s.y);
+            } catch (e) { }
+            if (s.weaponType === 1) {
+                fireBulletBase(s, speed, _life, spread, 0, "spread", isRemote);
+                fireBulletBase(s, speed, _life, spread, -0.2, "spread", isRemote);
+                fireBulletBase(s, speed, _life, spread, 0.2, "spread", isRemote);
+            } else if (s.weaponType === 2) {
+                fireBulletBase(
+                    s,
+                    speed,
+                    _life,
+                    spread,
+                    rand(-0.05, 0.05),
+                    "rapid",
+                    isRemote,
+                );
+            } else {
+                fireBulletBase(s, speed, _life, spread, 0, "laser", isRemote);
+            }
+
+            if (
+                window.isMultiplayer &&
+                !isRemote &&
+                photonClient &&
+                photonClient.isJoinedToRoom()
+            ) {
+                if (s.id === playerId || (isRoomHost() && s.ai && !s.isRemoteAI)) {
+                    const syncId = s.id === playerId ? null : s.id;
+                    photonClient.raiseEvent(
+                        2,
+                        { id: syncId, x: s.x, y: s.y, a: s.angle, type: s.weaponType },
+                        {
+                            receivers: Photon.LoadBalancing.Constants.ReceiverGroup.Others,
+                        },
+                    );
+                }
+            }
+        }
+        function spawnSmoke(x, y, count, power = 1) {
+            const actualCount = lightweightMode
+                ? Math.max(1, Math.floor(count * 0.3))
+                : count;
+            for (let i = 0; i < actualCount; i++) {
+                particles.push({
+                    x: wrap(x + rand(-6, 6), WORLD_W),
+                    y: wrap(y + rand(-6, 6), WORLD_H),
+                    vx: rand(-0.6, 0.6) * power + rand(-0.2, 0.2),
+                    vy: rand(-0.9, 0.2) * power + rand(-0.2, 0.2),
+                    life: rand(0.35, 0.9),
+                    maxLife: 0.9,
+                    size: rand(2, 5) * power,
+                    smoke: true,
+                });
+            }
+        }
+        function spawnExplosion(x, y, count, power = 1, size = "medium") {
+            const actualCount = lightweightMode
+                ? Math.max(2, Math.floor(count * 0.35))
+                : count;
+            for (let i = 0; i < actualCount; i++) {
+                particles.push({
+                    x: wrap(x, WORLD_W),
+                    y: wrap(y, WORLD_H),
+                    vx: rand(-2, 2) * power,
+                    vy: rand(-2, 2) * power,
+                    life: rand(0.3, 0.9),
+                    maxLife: 0.9,
+                    size: rand(1, 3) * power,
+                });
+            }
+            try {
+                playExplosionSound(size);
+            } catch (e) { }
+        }
+
+        /* ========== 更新ルーチン ========== */
+        let last = performance.now();
+        let score = 0,
+            lives = 5,
+            wave = 1,
+            message = "";
+        let gameOverMode = false;
+        let fpsAccum = 0,
+            fpsFrames = 0,
+            fpsDisplay = 0;
+        const AI_SHOT_RESERVE = 10;
+        const AI_SHOT_BOX_HALF = 500;
+        const FLEE_HEAT_RATIO = 0.98;
+        const COOLED_HEAT_RATIO = 0.35;
+        const SAFE_DISTANCE = 600;
+        const SAFE_DISTANCE2 = SAFE_DISTANCE * SAFE_DISTANCE;
+
+        function addScore(v, x, y) {
+            if (gameOverMode || window.isMultiplayer) return; // マルチプレイはスコア加算なし
+            score += v;
+            if (x !== undefined && y !== undefined) {
+                const size = Math.max(10, damageTextBaseSize * 0.8);
+                floatingTexts.push(
+                    new FloatingText(x, y, `+${v}`, "#ffffff", 1.0, size),
+                );
+            }
+        }
+
+        function enterGameOverMode() {
+            if (gameOverMode || window.isMultiplayer) return;
+            gameOverMode = true;
+            message = `GAME OVER - [R]キーかメニューから終了してランキングを確認`;
+            updateTouchUIVisibility();
+        }
+
+        async function handleGameOverSubmit() {
+            message = `MISSION FAILED - スコア送信中...`;
+            const diff = window.currentDifficulty || "normal";
+            if (window.submitScoreToServer)
+                await window.submitScoreToServer(score, diff);
+            message = `MISSION FAILED - ランキング取得中...`;
+            if (window.fetchTopRanks)
+                displayRanking(await window.fetchTopRanks(diff));
+        }
+
+        function handleMatchEnd(winningTeam) {
+            if (matchEnded) return;
+            matchEnded = true;
+            updateTouchUIVisibility();
+            let msg = winningTeam > 0 ? `TEAM ${winningTeam} 勝利!` : `DRAW!`;
+            const cdUI = document.getElementById("countdownUI");
+            cdUI.innerText = msg;
+            const col = winningTeam > 0 ? TEAM_COLORS[winningTeam] : "#00f0ff";
+            cdUI.style.color = col;
+            cdUI.style.textShadow = `0 0 30px ${col}`;
+            cdUI.style.fontSize = "80px";
+            cdUI.style.display = "block";
+
+            setTimeout(() => {
+                cdUI.style.display = "none";
+                cdUI.style.fontSize = "100px";
+                showResultModal(winningTeam);
+            }, 4000);
+        }
+
+        function showResultModal(winningTeam) {
+            running = false;
+            document.getElementById("resultModal").style.display = "block";
+            const rt = document.getElementById("resultTitle");
+            const col = winningTeam > 0 ? TEAM_COLORS[winningTeam] : "#00f0ff";
+            rt.innerText =
+                winningTeam > 0 ? `チーム ${winningTeam} 勝利` : `引き分け`;
+            rt.style.color = col;
+            rt.style.textShadow = `0 0 15px ${col}`;
+
+            const list = document.getElementById("resultList");
+            list.innerHTML = "";
+
+            // プレイヤーの生存情報を表示
+            const actors = photonClient ? photonClient.myRoomActors() : {};
+            ships
+                .filter((s) => s.faction === "player" || s.isRemotePlayer)
+                .forEach((s) => {
+                    let name = "UNKNOWN";
+                    if (s.id === playerId) {
+                        name = localStorage.getItem("playerNickname_v1") || "YOU";
+                    } else {
+                        const actId = s.id.split("_")[1];
+                        if (actors[actId])
+                            name =
+                                actors[actId].getCustomProperty("name") || `PILOT ${actId}`;
+                    }
+                    const status = s.isGhost ? "撃破" : "生存";
+                    list.innerHTML += `<div style="color:${TEAM_COLORS[s.team]}; padding:6px; border-bottom:1px solid rgba(0,240,255,0.2);">
+            [チーム ${s.team}] ${name} : ${status}
+        </div>`;
+                });
+        }
+
+        function displayRanking(ranks) {
+            const rankingListDiv = document.getElementById("rankingList");
+            if (!rankingListDiv) return;
+            let html = "<ol>";
+            if (ranks && ranks.length > 0) {
+                ranks.forEach((r, index) => {
+                    const name = r.name
+                        ? String(r.name).replace(/</g, "&lt;").replace(/>/g, "&gt;")
+                        : "UNKNOWN";
+                    const pscore = Number.isFinite(r.score) ? r.score : 0;
+                    html += `<li><span>${index + 1}. ${name}</span><span>${pscore}</span></li>`;
+                });
+            } else {
+                html += "<li>データがありません</li>";
+            }
+            html += "</ol>";
+            rankingListDiv.innerHTML = html;
+            document.getElementById("rankingModal").style.display = "block";
+            if (running) setPauseState(true);
+        }
+
+        /* ========== 更新 ========== */
+        function update(dt) {
+            if (!window.isMultiplayer && isPaused) return;
+
+            let isAnyPlayerBoosting = false; // ブースト音用のフラグ
+
+            const player = ships.find((s) => s.id === playerId);
+            if (cameraShake > 0) {
+                cameraShake *= 0.9;
+                if (cameraShake < 0.5) cameraShake = 0;
+            }
+            for (let i = floatingTexts.length - 1; i >= 0; i--) {
+                floatingTexts[i].update(dt);
+                if (floatingTexts[i].life <= 0) floatingTexts.splice(i, 1);
+            }
+            for (let i = powerups.length - 1; i >= 0; i--) {
+                powerups[i].update(dt);
+                if (
+                    player &&
+                    !player.isGhost &&
+                    !gameOverMode &&
+                    torusDist2(player.x, player.y, powerups[i].x, powerups[i].y) <
+                    (14 + powerups[i].radius) ** 2
+                ) {
+                    powerups[i].apply(player);
+                    powerups.splice(i, 1);
+                    continue;
+                }
+                if (powerups[i].life <= 0) powerups.splice(i, 1);
+            }
+            // 武器タイマー管理（実時間ベース）
+            if (player && player.weaponType > 0 && player.weaponStartTime) {
+                const elapsed = performance.now() - player.weaponStartTime;
+                if (elapsed >= player.weaponDuration) {
+                    player.weaponType = 0;
+                    player.weaponStartTime = 0;
+                    player.weaponDuration = 0;
+                }
+            }
+            // HP回復リングエフェクト管理
+            if (player && player.healRing) {
+                player.healRing.life -= dt;
+                if (player.healRing.life <= 0) player.healRing = null;
+            }
+
+            if (player) {
+                if (!isPaused && player.alive) {
+                    const isGhostPlayer = player.isGhost;
+                    let turnLeft =
+                        controlMode === "keyboard" &&
+                        isAnyPressedForBind(keyBindings.turnLeft);
+                    let turnRight =
+                        controlMode === "keyboard" &&
+                        isAnyPressedForBind(keyBindings.turnRight);
+                    let thrustKey = isAnyPressedForBind(keyBindings.thrust);
+                    const brakeKey = isAnyPressedForBind(keyBindings.brake);
+                    const shootKey =
+                        !isGhostPlayer &&
+                        (isAnyPressedForBind(keyBindings.shoot) ||
+                            mouse.down ||
+                            keys[" "]);
+                    const boostKey =
+                        isAnyPressedForBind(keyBindings.boost) || keys["shift"];
+                    const rollLeft =
+                        isAnyPressedForBind(keyBindings.rollLeft) || keys["q"];
+                    const rollRight =
+                        isAnyPressedForBind(keyBindings.rollRight) || keys["e"];
+
+                    // Touch aim override
+                    if (controlMode === "touch" && keys["touch_aim"]) {
+                        player.angle = angleLerp(player.angle, keys["touch_angle"], 0.28);
+                        if (keys["touch_thrust"]) thrustKey = true;
+                    } else if (controlMode === "mouse") {
+                        const canvasRect = canvas.getBoundingClientRect();
+                        const aimAng = Math.atan2(
+                            mouse.y - canvasRect.height / 2,
+                            mouse.x - canvasRect.width / 2,
+                        );
+                        player.angle = angleLerp(player.angle, aimAng, 0.28);
+                    }
+                    if (turnLeft) player.angle -= player.turnSpeed;
+                    if (turnRight) player.angle += player.turnSpeed;
+                    const ca = Math.cos(player.angle),
+                        sa = Math.sin(player.angle);
+
+                    // 通常移動時の推進
+                    if (thrustKey) {
+                        player.vx += ca * player.thrust;
+                        player.vy += sa * player.thrust;
+                        // 通常移動の煙を追加 (ブースト時と同等の量に)
+                        if (GameFrames % 2 === 0) {
+                            spawnSmoke(player.x - ca * 12, player.y - sa * 12, 3, 2.0);
+                        }
+                    }
+                    if (brakeKey) {
+                        player.vx *= 1 - player.drag * 10;
+                        player.vy *= 1 - player.drag * 10;
+                    }
+
+                    // ブースト時の推進
+                    if (boostKey && player.heat < player.maxHeat) {
+                        isAnyPlayerBoosting = true; // 音用フラグ
+
+                        player.vx += ca * player.thrust * 2.2;
+                        player.vy += sa * player.thrust * 2.2;
+                        player.heat += 30 * dt;
+                        player.boosting = true;
+                        player.boostTimer += dt;
+                        if (Math.random() < 0.3) shakeCamera(2);
+
+                        let baseCol =
+                            window.isMultiplayer || window._testPlayMode
+                                ? TEAM_COLORS[player.team]
+                                : player.team === 3
+                                    ? TEAM_COLORS[3]
+                                    : TEAM_COLORS[1];
+                        if (!lightweightMode && GameFrames % 3 === 0) {
+                            particles.push({
+                                x: player.x,
+                                y: player.y,
+                                vx: 0,
+                                vy: 0,
+                                life: 0.25,
+                                maxLife: 0.25,
+                                size: 14,
+                                smoke: true,
+                                isGhost: true,
+                                angle: player.angle,
+                                color: baseCol,
+                            });
+                        }
+                        if (GameFrames % 2 === 0) {
+                            // ブースト時は煙を増量
+                            spawnSmoke(player.x - ca * 12, player.y - sa * 12, 3, 2.0);
+                        }
+                    } else {
+                        player.boosting = false;
+                        player.boostTimer = Math.max(0, player.boostTimer - dt * 0.5);
+                    }
+
+                    if (rollLeft) {
+                        player.vx += -sa * 0.12;
+                        player.vy += ca * 0.12;
+                        player.rollPhase -= 0.3;
+                    }
+                    if (rollRight) {
+                        player.vx += sa * 0.12;
+                        player.vy += -ca * 0.12;
+                        player.rollPhase += 0.3;
+                    }
+
+                    player.shootTimer -= dt;
+                    if (
+                        !gameOverMode &&
+                        shootKey &&
+                        player.shootTimer <= 0 &&
+                        player.heat < player.maxHeat * 0.95
+                    ) {
+                        fireBullet(player, 47, 7.5, 0.5);
+                        player.heat += 4;
+                        player.shootTimer =
+                            player.weaponType === 2
+                                ? player.shootCd / 2500
+                                : player.shootCd / 1000;
+                    }
+                } else if (player.isGhost) {
+                    // 幽霊は観戦のため自由にカメラ移動可能
+                    const turnLeft =
+                        controlMode === "keyboard" &&
+                        isAnyPressedForBind(keyBindings.turnLeft);
+                    const turnRight =
+                        controlMode === "keyboard" &&
+                        isAnyPressedForBind(keyBindings.turnRight);
+                    if (controlMode === "touch" && keys["touch_aim"]) {
+                        player.angle = angleLerp(player.angle, keys["touch_angle"], 0.28);
+                    } else if (controlMode === "mouse") {
+                        const canvasRect = canvas.getBoundingClientRect();
+                        const aimAng = Math.atan2(
+                            mouse.y - canvasRect.height / 2,
+                            mouse.x - canvasRect.width / 2,
+                        );
+                        player.angle = angleLerp(player.angle, aimAng, 0.28);
+                    }
+                    if (turnLeft) player.angle -= player.turnSpeed;
+                    if (turnRight) player.angle += player.turnSpeed;
+                    const ca = Math.cos(player.angle),
+                        sa = Math.sin(player.angle);
+                    if (isAnyPressedForBind(keyBindings.thrust)) {
+                        player.vx += ca * player.thrust * 2;
+                        player.vy += sa * player.thrust * 2;
+                    }
+                    if (isAnyPressedForBind(keyBindings.brake)) {
+                        player.vx *= 1 - player.drag * 10;
+                        player.vy *= 1 - player.drag * 10;
+                    }
+                }
+
+                player.heat = clamp(player.heat - 20 * dt, 0, player.maxHeat);
+                player.rollPhase *= 0.9;
+                if (
+                    Math.hypot(player.vx, player.vy) >
+                    player.maxSpeed + (player.boosting ? 2.5 : 0)
+                ) {
+                    player.vx *= 0.985;
+                    player.vx *= 0.985;
+                }
+                player.vx *= 1 - player.drag;
+                player.vy *= 1 - player.drag;
+                if (player.weaponTimer > 0 && !player.isGhost) {
+                    player.weaponTimer -= dt;
+                    if (player.weaponTimer <= 0) player.weaponType = 0;
+                }
+
+                player.x = wrap(player.x + player.vx, WORLD_W);
+                player.y = wrap(player.y + player.vy, WORLD_H);
+            }
+
+            // 勝敗判定 (マルチプレイ)
+            if (
+                window.isMultiplayer &&
+                running &&
+                !matchEnded &&
+                performance.now() - matchStartTime > 3000
+            ) {
+                let aliveTeams = new Set();
+                ships.forEach((s) => {
+                    if (
+                        s.hp > 0 ||
+                        (s.lives !== undefined && s.lives > 0) ||
+                        (s.id === playerId && lives > 0)
+                    ) {
+                        aliveTeams.add(s.team);
+                    }
+                });
+                if (aliveTeams.size <= 1) {
+                    let winningTeam =
+                        aliveTeams.size === 1 ? Array.from(aliveTeams)[0] : 0;
+                    handleMatchEnd(winningTeam);
+                }
+            }
+
+            for (const s of ships) {
+                if (!s.alive) continue;
+                if (s.isRemotePlayer || s.isRemoteAI) {
+                    // Dead reckoning: extrapolate with velocity, then lerp to correct position
+                    const lerpRate = Math.min(1, 12 * dt);
+                    if (s.targetX !== undefined) {
+                        // Apply velocity for prediction
+                        s.x = wrap(s.x + (s.vx || 0) * dt, WORLD_W);
+                        s.y = wrap(s.y + (s.vy || 0) * dt, WORLD_H);
+                        // Lerp toward authoritative position
+                        s.x = torusLerp(s.x, s.targetX, WORLD_W, lerpRate);
+                        s.y = torusLerp(s.y, s.targetY, WORLD_H, lerpRate);
+                    }
+                    if (s.targetAngle !== undefined)
+                        s.angle = angleLerp(s.angle, s.targetAngle, lerpRate);
+                    continue;
+                }
+                if (s.faction === "player" || !s.ai || s.isGhost) continue;
+
+                if (window.isMultiplayer && !isRoomHost()) continue;
+
+                s.ai.thinkTimer -= dt;
+                if (typeof s.boostTimer !== "number") s.boostTimer = 0;
+                if (s.heat >= s.maxHeat * FLEE_HEAT_RATIO) {
+                    s.ai.fleeing = true;
+                }
+
+                const aiDiff = s.ai.difficulty || "normal";
+                const player = ships.find((p) => p.id === playerId);
+
+                // Hard: ヒート管理ステート (80%超→回避専念、30%以下→解除)
+                if (aiDiff === "hard") {
+                    if (!s.ai.heatFleeing && s.heat > s.maxHeat * 0.8)
+                        s.ai.heatFleeing = true;
+                    if (s.ai.heatFleeing && s.heat <= s.maxHeat * COOLED_HEAT_RATIO)
+                        s.ai.heatFleeing = false;
+                }
+
+                let target = s.ai.targetId
+                    ? ships.find((o) => o.id === s.ai.targetId)
+                    : null;
+                if (
+                    s.ai.thinkTimer <= 0 ||
+                    !target ||
+                    !target.alive ||
+                    target.isGhost
+                ) {
+                    let best = null;
+                    let bestScore = 1e12;
+                    for (const f of ships) {
+                        if (!f.alive || f.isGhost || f.id === s.id || !areEnemies(s, f))
+                            continue;
+                        if (gameOverMode && f.id === playerId) continue;
+                        const d2 = torusDist2(s.x, s.y, f.x, f.y);
+                        const dist = Math.sqrt(d2);
+                        if (aiDiff === "hard") {
+                            // Hard: HP低い敵+近い敵を優先 (距離1000以内なら低HPを大幅優先)
+                            const hpRatio = f.hp / f.maxHp;
+                            const closeBonus = dist < 1000 ? 0.15 : 0.4;
+                            const effective =
+                                dist * (closeBonus + hpRatio * (1.0 - closeBonus));
+                            if (effective < bestScore) {
+                                bestScore = effective;
+                                best = f;
+                            }
+                        } else {
+                            if (d2 < bestScore) {
+                                bestScore = d2;
+                                best = f;
+                            }
+                        }
+                    }
+                    s.ai.targetId = best ? best.id : null;
+
+                    // Hard: 戦術選択（ヒート管理ステートを活用）
+                    if (aiDiff === "hard") {
+                        if (s.ai.heatFleeing) {
+                            // ヒート回避中でも、2発以内で倒せる近い敵がいれば攻撃続行
+                            let canFinish = false;
+                            if (best) {
+                                const bestDist = Math.sqrt(
+                                    torusDist2(s.x, s.y, best.x, best.y),
+                                );
+                                if (best.hp <= 50 && bestDist < 1000) canFinish = true;
+                            }
+                            s.ai.mode = canFinish ? "attack" : "evade";
+                        } else if (player && !player.isGhost) {
+                            const playerHeatRatio = player.heat / player.maxHeat;
+                            if (playerHeatRatio > 0.7) {
+                                s.ai.mode = "attack";
+                            } else {
+                                s.ai.mode = Math.random() < 0.08 ? "evade" : "attack";
+                            }
+                        } else {
+                            s.ai.mode = "attack";
+                        }
+                        s.ai.thinkTimer = rand(0.08, 0.3);
+                    } else if (aiDiff === "easy") {
+                        s.ai.mode = Math.random() < 0.35 ? "evade" : "attack";
+                        s.ai.thinkTimer = rand(1.0, 2.5);
+                    } else {
+                        s.ai.mode = Math.random() < 0.2 ? "evade" : "attack";
+                        s.ai.thinkTimer = rand(0.5, 1.5);
+                    }
+                }
+                if (s.ai.targetId)
+                    target = ships.find((o) => o.id === s.ai.targetId) || null;
+                const avoidRadius = 120;
+                let avoided = false;
+                const priorityFightDist2 = 600 * 600;
+                const targetDist2 = target
+                    ? torusDist2(s.x, s.y, target.x, target.y)
+                    : Infinity;
+
+                for (const a of asteroids) {
+                    const d2 = torusDist2(s.x, s.y, a.x, a.y);
+                    const thresh = (avoidRadius + a.r) * (avoidRadius + a.r);
+                    if (target && targetDist2 < priorityFightDist2) {
+                        const emergencyThresh =
+                            (avoidRadius / 2 + a.r) * (avoidRadius / 2 + a.r);
+                        if (d2 < emergencyThresh) {
+                            const ex = ((s.x - a.x + WORLD_W / 2) % WORLD_W) - WORLD_W / 2;
+                            const ey = ((s.y - a.y + WORLD_H / 2) % WORLD_H) - WORLD_H / 2;
+                            const L = Math.hypot(ex, ey) || 0.0001;
+                            const nx = ex / L,
+                                ny = ey / L;
+                            if (s.heat <= s.maxHeat - AI_SHOT_RESERVE) {
+                                s.vx += nx * s.thrust * 2.2;
+                                s.vy += ny * s.thrust * 2.2;
+                                s.heat += 20;
+                                s.boostTimer += 0.12;
+                                s.boosting = true;
+                                s.boostTimer += dt;
+                            } else {
+                                s.vx += nx * s.thrust * 1.4;
+                                s.vy += ny * s.thrust * 1.4;
+                            }
+                            const angEscape = Math.atan2(ny, nx);
+                            const diffE = ((angEscape - s.angle + Math.PI) % TAU) - Math.PI;
+                            s.angle += clamp(diffE, -s.turnSpeed * 1.5, s.turnSpeed * 1.5);
+                            avoided = true;
+                            break;
+                        }
+                    } else {
+                        if (d2 < thresh) {
+                            const ex = ((s.x - a.x + WORLD_W / 2) % WORLD_W) - WORLD_W / 2;
+                            const ey = ((s.y - a.y + WORLD_H / 2) % WORLD_H) - WORLD_H / 2;
+                            const L = Math.hypot(ex, ey) || 0.0001;
+                            const nx = ex / L,
+                                ny = ey / L;
+                            s.vx += nx * s.thrust * 1.4;
+                            s.vy += ny * s.thrust * 1.4;
+                            const angEscape = Math.atan2(ny, nx);
+                            const diffE = ((angEscape - s.angle + Math.PI) % TAU) - Math.PI;
+                            s.angle += clamp(diffE, -s.turnSpeed * 1.5, s.turnSpeed * 1.5);
+                            avoided = true;
+                            break;
+                        }
+                    }
+                }
+
+                // Hard: ヒート回避中の弾回避行動
+                if (
+                    !avoided &&
+                    aiDiff === "hard" &&
+                    s.ai.heatFleeing &&
+                    s.ai.mode === "evade"
+                ) {
+                    let closestBullet = null;
+                    let closestBd = 1e12;
+                    for (const b of bullets) {
+                        if (b.owner === s.id) continue;
+                        const ownerShip = ships.find((x) => x.id === b.owner);
+                        if (ownerShip && !areEnemies(s, ownerShip)) continue;
+                        const bd = torusDist2(s.x, s.y, b.x, b.y);
+                        if (bd < closestBd) {
+                            closestBd = bd;
+                            closestBullet = b;
+                        }
+                    }
+                    if (closestBullet && closestBd < 1000 * 1000) {
+                        const bAng = Math.atan2(closestBullet.vy, closestBullet.vx);
+                        const perpDir = s.id % 2 === 0 ? 1 : -1;
+                        const evadeAng = bAng + (Math.PI / 2) * perpDir;
+                        s.vx += Math.cos(evadeAng) * s.thrust * 2.0;
+                        s.vy += Math.sin(evadeAng) * s.thrust * 2.0;
+                        avoided = true;
+                    }
+                }
+                if (!avoided) {
+                    const jitter =
+                        Math.sin(performance.now() / 300 + s.id) * 0.3 +
+                        (s.ai.formation || 0) * 0.5;
+                    if (target) {
+                        const dist = Math.sqrt(targetDist2);
+
+                        // 難易度別の偏差射撃予測
+                        let predX, predY;
+                        if (aiDiff === "hard") {
+                            // Hard: 弾速ベースの正確な予測
+                            const BULLET_SPEED = 47;
+                            // 1次予測: 距離/弾速 = 飛翎時間
+                            let tFlight = dist / BULLET_SPEED;
+                            // ターゲットの速度ベクトル
+                            const tvx = target.vx || 0,
+                                tvy = target.vy || 0;
+                            // 1次予測位置
+                            let px1 = target.x + tvx * tFlight;
+                            let py1 = target.y + tvy * tFlight;
+                            // 2次予測: 予測位置への距離を再計算
+                            const d2 = Math.hypot(px1 - s.x, py1 - s.y);
+                            tFlight = d2 / BULLET_SPEED;
+                            // 自機の速度も加味(弾は自機の速度も引き継ぐ)
+                            predX = target.x + tvx * tFlight - (s.vx || 0) * tFlight * 0.3;
+                            predY = target.y + tvy * tFlight - (s.vy || 0) * tFlight * 0.3;
+                            // 加速方向のバイアス補正(ターゲットの旋回方向予測)
+                            if (target.ai || target.faction === "player") {
+                                const targetAngle = target.angle || 0;
+                                const tCos = Math.cos(targetAngle),
+                                    tSin = Math.sin(targetAngle);
+                                const accelBias = target.boosting ? 0.8 : 0.3;
+                                predX += tCos * target.thrust * tFlight * accelBias;
+                                predY += tSin * target.thrust * tFlight * accelBias;
+                            }
+                        } else if (aiDiff === "easy") {
+                            const laDiv = 35;
+                            const lookahead = Math.min(dist / laDiv, 30);
+                            predX = target.x + (target.vx || 0) * lookahead * 0.5;
+                            predY = target.y + (target.vy || 0) * lookahead * 0.5;
+                        } else {
+                            const laDiv = 25;
+                            const lookahead = Math.min(dist / laDiv, 30);
+                            predX = target.x + (target.vx || 0) * lookahead * 0.7;
+                            predY = target.y + (target.vy || 0) * lookahead * 0.7;
+                        }
+
+                        const ang = Math.atan2(predY - s.y, predX - s.x);
+                        const diff = ((ang - s.angle + Math.PI) % TAU) - Math.PI;
+                        s.angle +=
+                            clamp(diff, -s.turnSpeed, s.turnSpeed) +
+                            jitter * (aiDiff === "hard" ? 0.003 : 0.02);
+                        const ca = Math.cos(s.angle),
+                            sa = Math.sin(s.angle);
+
+                        if (s.ai.mode === "attack") {
+                            const isFar = targetDist2 > 250 * 250;
+                            const isClose = targetDist2 < 120 * 120;
+
+                            if (aiDiff === "hard" && isClose) {
+                                // Hard近距離: 円運動で背後を取る
+                                const circleDir = s.id % 2 === 0 ? 1 : -1;
+                                const perpAng = ang + (Math.PI / 2) * circleDir;
+                                const perpCa = Math.cos(perpAng),
+                                    perpSa = Math.sin(perpAng);
+                                s.vx += perpCa * s.thrust * 1.3;
+                                s.vy += perpSa * s.thrust * 1.3;
+                                s.vx += ca * s.thrust * 0.6;
+                                s.vy += sa * s.thrust * 0.6;
+                            } else if (isFar) {
+                                const needTurn =
+                                    Math.abs(diff) > (aiDiff === "hard" ? 0.15 : 0.25);
+                                if (
+                                    needTurn &&
+                                    s.heat <= s.maxHeat - AI_SHOT_RESERVE &&
+                                    s.boostTimer <= 0
+                                ) {
+                                    s.vx += ca * s.thrust * 2.2;
+                                    s.vy += sa * s.thrust * 2.2;
+                                    s.heat += 12;
+                                    s.boostTimer = 0.12;
+                                    s.boosting = true;
+                                } else {
+                                    s.vx += ca * s.thrust * (aiDiff === "hard" ? 1.3 : 1.0);
+                                    s.vy += sa * s.thrust * (aiDiff === "hard" ? 1.3 : 1.0);
+                                }
+                            } else {
+                                s.vx += ca * s.thrust;
+                                s.vy += sa * s.thrust;
+                            }
+
+                            // 射撃判定 (難易度により閾値が異なる)
+                            const shootThreshold =
+                                aiDiff === "hard" ? 0.25 : aiDiff === "easy" ? 0.35 : 0.2;
+                            const td = torusDelta(s.x, s.y, target.x, target.y);
+                            if (
+                                Math.abs(td.dx) <= AI_SHOT_BOX_HALF &&
+                                Math.abs(td.dy) <= AI_SHOT_BOX_HALF
+                            ) {
+                                if (Math.abs(diff) < shootThreshold) attemptShoot(s, target);
+                            }
+
+                            // Hard: ヒートが低く敵が近い場合、積極的にブースト追い込み
+                            if (
+                                aiDiff === "hard" &&
+                                s.heat < s.maxHeat * 0.4 &&
+                                !isFar &&
+                                !isClose &&
+                                s.boostTimer <= 0
+                            ) {
+                                s.vx += ca * s.thrust * 1.8;
+                                s.vy += sa * s.thrust * 1.8;
+                                s.heat += 8;
+                                s.boostTimer = 0.1;
+                                s.boosting = true;
+                            }
+                        } else if (s.ai.mode === "evade") {
+                            s.vx -= ca * s.thrust * 0.8;
+                            s.vy -= sa * s.thrust * 0.8;
+                            if (Math.random() < 0.05)
+                                s.rollPhase += (Math.random() < 0.5 ? -1 : 1) * 0.6;
+                            // Hard退避: 横方向にも動いて予測を困難にする
+                            if (aiDiff === "hard") {
+                                const evadePerp = s.id % 2 === 0 ? 1 : -1;
+                                s.vx += -sa * s.thrust * 0.5 * evadePerp;
+                                s.vy += ca * s.thrust * 0.5 * evadePerp;
+                            }
+                        } else {
+                            if (Math.random() < 0.6) {
+                                s.vx += ca * s.thrust * 0.6;
+                                s.vy += sa * s.thrust * 0.6;
+                            }
+                        }
+                    } else {
+                        s.angle += jitter * 0.02;
+                        const ca = Math.cos(s.angle),
+                            sa = Math.sin(s.angle);
+                        s.vx += ca * s.thrust * 0.3;
+                        s.vy += sa * s.thrust * 0.3;
+                    }
+                }
+                const sp2 = Math.hypot(s.vx, s.vy);
+                if (sp2 > s.maxSpeed) {
+                    s.vx *= 0.99;
+                    s.vy *= 0.99;
+                }
+                s.vx *= 1 - s.drag;
+                s.vy *= 1 - s.drag;
+                s.shootTimer -= dt;
+                s.heat = clamp(
+                    s.heat - (aiDiff === "hard" ? 16 : 14) * dt,
+                    0,
+                    s.maxHeat,
+                );
+                s.x = wrap(s.x + s.vx, WORLD_W);
+                s.y = wrap(s.y + s.vy, WORLD_H);
+                s.boostTimer = Math.max(0, s.boostTimer - dt);
+                s.boosting = s.boostTimer > 0;
+                // ランダムブースト（Hardは頻度UP）
+                const boostChance =
+                    aiDiff === "hard" ? 0.005 : aiDiff === "easy" ? 0.001 : 0.002;
+                if (
+                    !s.ai.fleeing &&
+                    s.boostTimer <= 0 &&
+                    Math.random() < boostChance &&
+                    s.heat <= s.maxHeat - AI_SHOT_RESERVE
+                ) {
+                    s.vx += Math.cos(s.angle) * 0.6;
+                    s.vy += Math.sin(s.angle) * 0.6;
+                    s.heat += 12;
+                    s.boostTimer = 0.08;
+                    s.boosting = true;
+                }
+
+                // AIの煙と残像生成
+                const ca = Math.cos(s.angle),
+                    sa = Math.sin(s.angle);
+                if (s.boosting) {
+                    let baseCol =
+                        window.isMultiplayer || window._testPlayMode
+                            ? TEAM_COLORS[s.team]
+                            : s.team === 3
+                                ? TEAM_COLORS[3]
+                                : TEAM_COLORS[2];
+                    if (!lightweightMode && GameFrames % 3 === 0) {
+                        particles.push({
+                            x: s.x,
+                            y: s.y,
+                            vx: 0,
+                            vy: 0,
+                            life: 0.25,
+                            maxLife: 0.25,
+                            size: 14,
+                            smoke: true,
+                            isGhost: true,
+                            angle: s.angle,
+                            color: baseCol,
+                        });
+                    }
+                    if (GameFrames % 2 === 0) {
+                        spawnSmoke(s.x - ca * 12, s.y - sa * 12, 3, 2.0);
+                    }
+                } else if (Math.hypot(s.vx, s.vy) > s.maxSpeed * 0.3) {
+                    // ある程度加速している時の通常煙
+                    if (GameFrames % 2 === 0) {
+                        spawnSmoke(s.x - ca * 12, s.y - sa * 12, 3, 2.0);
+                    }
+                }
+            }
+
+            // ブースト音のコントロール
+            if (boostGain && audioCtx) {
+                // スムーズに音量を遷移させる
+                const targetGain =
+                    isAnyPlayerBoosting && audioSettings.boostSound ? 1.0 : 0.0;
+                boostGain.gain.setTargetAtTime(
+                    targetGain,
+                    audioCtx.currentTime,
+                    0.05,
+                );
+            }
+
+            for (let j = bullets.length - 1; j >= 0; j--) {
+                const b = bullets[j];
+
+                const nextX = b.x + b.vx;
+                const nextY = b.y + b.vy;
+
+                // 世界の端（境界）に到達したらループさせずに消滅させる
+                if (nextX < 0 || nextX >= WORLD_W || nextY < 0 || nextY >= WORLD_H) {
+                    bullets.splice(j, 1);
+                    continue;
+                }
+
+                b.x = nextX;
+                b.y = nextY;
+                b.life -= dt;
+
+                // 寿命が尽きたら消える
+                if (b.life <= 0) {
+                    bullets.splice(j, 1);
+                    continue;
+                }
+
+                let hit = false;
+                for (const s of ships) {
+                    if (!s.alive || s.isGhost || s.id === b.owner) continue;
+                    if (
+                        areEnemies(s, {
+                            id: b.owner,
+                            team: b.ownerTeam,
+                            faction: ships.find((o) => o.id === b.owner)?.faction,
+                        }) === false
+                    )
+                        continue;
+
+                    // 当たり判定を拡大（機体全体をカバーする半径24に設定）
+                    if (torusDist2(s.x, s.y, b.x, b.y) < (24 + b.radius) ** 2) {
+                        bullets.splice(j, 1);
+                        spawnExplosion(b.x, b.y, 14, 1.2);
+                        spawnSmoke(b.x, b.y, 5, 2.0); // レーザーヒット時の煙を追加
+
+                        if (showDamage) {
+                            let dmgColor = "#ff0055";
+                            const shooter = ships.find((o) => o.id === b.owner);
+                            const shooterTeam = b.ownerTeam || (shooter ? shooter.team : 2);
+                            if (window.isMultiplayer) {
+                                dmgColor = TEAM_COLORS[shooterTeam];
+                            } else {
+                                dmgColor =
+                                    shooterTeam === 3
+                                        ? TEAM_COLORS[3]
+                                        : shooterTeam === 1
+                                            ? TEAM_COLORS[1]
+                                            : TEAM_COLORS[2];
+                            }
+                            floatingTexts.push(
+                                new FloatingText(
+                                    s.x,
+                                    s.y,
+                                    "-20",
+                                    dmgColor,
+                                    1.0,
+                                    damageTextBaseSize,
+                                ),
+                            );
+                        }
+
+                        const isMine =
+                            s.id === playerId ||
+                            (!window.isMultiplayer && s.ai) ||
+                            (window.isMultiplayer && isRoomHost() && s.ai && !s.isRemoteAI);
+
+                        if (isMine) {
+                            s.hp -= 20;
+                            if (s.id === playerId) shakeCamera(10);
+
+                            if (s.hp <= 0 && s.alive) {
+                                spawnExplosion(s.x, s.y, 28, 2.2, "large");
+                                spawnSmoke(s.x, s.y, 20, 4.0); // 機体爆発時の煙を大量に追加
+
+                                if (s.id === playerId) {
+                                    s.isGhost = true;
+                                    s.hp = 0;
+                                    if (window.isMultiplayer && photonClient) {
+                                        photonClient.raiseEvent(
+                                            3,
+                                            {
+                                                killerId: b.owner,
+                                                deadActorNr: photonClient.myActor().actorNr,
+                                                x: s.x,
+                                                y: s.y,
+                                            },
+                                            {
+                                                receivers:
+                                                    Photon.LoadBalancing.Constants.ReceiverGroup.Others,
+                                            },
+                                        );
+                                    }
+                                    lives -= 1;
+                                    shakeCamera(20);
+                                    if (lives > 0) {
+                                        if (window.isMultiplayer)
+                                            setTimeout(() => respawnMultiplayerPlayer(), 2000);
+                                        else setTimeout(() => respawnPlayer(), 600);
+                                    } else {
+                                        if (!window.isMultiplayer) enterGameOverMode();
+                                    }
+                                } else {
+                                    s.alive = false;
+                                    s.hp = 0;
+                                    if (powerupsEnabled && Math.random() < s.dropRate)
+                                        spawnPowerUp(s.x, s.y);
+                                    if (!window.isMultiplayer) {
+                                        if (b.owner === playerId) {
+                                            addScore(150, s.x, s.y);
+                                            shakeCamera(10);
+                                        } else if (b.ownerTeam === getMyTeam()) addScore(50);
+                                    }
+                                    if (
+                                        window.isMultiplayer &&
+                                        isRoomHost() &&
+                                        s.ai &&
+                                        !s.isRemoteAI
+                                    ) {
+                                        if (s.lives > 0) {
+                                            s.lives--;
+                                            setTimeout(() => respawnAI(s), 2000);
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            if (b.owner === playerId) shakeCamera(2);
+                        }
+                        hit = true;
+                        break;
+                    }
+                }
+                if (hit) continue;
+
+                for (let i = asteroids.length - 1; i >= 0; i--) {
+                    const a = asteroids[i];
+                    if (torusDist2(a.x, a.y, b.x, b.y) < (a.r + b.radius) ** 2) {
+                        a.hp -= 1;
+                        bullets.splice(j, 1);
+                        spawnExplosion(b.x, b.y, 10, 1);
+                        spawnSmoke(b.x, b.y, 4, 1.5); // アステロイドヒット時の煙を追加
+
+                        if (b.owner === playerId) shakeCamera(2);
+                        if (a.hp <= 0) {
+                            splitAsteroid(a);
+                            spawnExplosion(a.x, a.y, Math.floor(a.r / 3), 1.6);
+                            spawnSmoke(a.x, a.y, 12, 3.0); // アステロイド破壊時の煙を追加
+                            asteroids.splice(i, 1);
+                        }
+                        hit = true;
+                        break;
+                    }
+                }
+            }
+
+            for (const a of asteroids) {
+                a.x = wrap(a.x + a.vx, WORLD_W);
+                a.y = wrap(a.y + a.vy, WORLD_H);
+                a.rot += a.rotv;
+            }
+
+            for (const s of ships) {
+                if (!s.alive || s.isGhost) continue;
+                for (const a of asteroids) {
+                    const r = a.r + 12;
+                    if (torusDist2(s.x, s.y, a.x, a.y) < r * r) {
+                        if (s.id === playerId && gameOverMode) continue;
+                        const isMine =
+                            s.id === playerId ||
+                            (!window.isMultiplayer && s.ai) ||
+                            (window.isMultiplayer && isRoomHost() && s.ai && !s.isRemoteAI);
+
+                        if (isMine) s.hp -= 40 * dt;
+                        if (Math.random() < dt * 14) spawnSmoke(s.x, s.y, 4, 1.2);
+                        if (s.id === playerId && Math.random() < 0.1) shakeCamera(5);
+
+                        if (isMine && s.hp <= 0 && s.alive) {
+                            spawnExplosion(s.x, s.y, 30, 2.5, "large");
+                            spawnSmoke(s.x, s.y, 20, 4.0); // 衝突による爆発時の煙を追加
+
+                            if (s.id === playerId) {
+                                s.isGhost = true;
+                                s.hp = 0;
+                                if (window.isMultiplayer && photonClient)
+                                    photonClient.raiseEvent(
+                                        3,
+                                        {
+                                            killerId: -1,
+                                            deadActorNr: photonClient.myActor().actorNr,
+                                            x: s.x,
+                                            y: s.y,
+                                        },
+                                        {
+                                            receivers:
+                                                Photon.LoadBalancing.Constants.ReceiverGroup.Others,
+                                        },
+                                    );
+                                lives -= 1;
+                                shakeCamera(20);
+                                if (lives > 0) {
+                                    if (window.isMultiplayer)
+                                        setTimeout(() => respawnMultiplayerPlayer(), 2000);
+                                    else setTimeout(() => respawnPlayer(), 600);
+                                } else {
+                                    if (!window.isMultiplayer) enterGameOverMode();
+                                }
+                            } else {
+                                s.alive = false;
+                                s.hp = 0;
+                                if (
+                                    window.isMultiplayer &&
+                                    isRoomHost() &&
+                                    s.ai &&
+                                    !s.isRemoteAI
+                                ) {
+                                    if (s.lives > 0) {
+                                        s.lives--;
+                                        setTimeout(() => respawnAI(s), 2000);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            for (const p of particles) {
+                p.life -= dt;
+                if (p.isGhost) continue;
+                p.x = wrap(p.x + p.vx, WORLD_W);
+                p.y = wrap(p.y + p.vy, WORLD_H);
+                p.vx *= 0.99;
+                p.vy *= 0.99;
+            }
+            particles = particles.filter((p) => p.life > 0);
+            if (lightweightMode && particles.length > PARTICLE_DRAW_LIMIT)
+                particles.length = PARTICLE_DRAW_LIMIT;
+
+            if (
+                !window.isMultiplayer &&
+                ships.filter((s) => s.faction === "enemy" && s.alive).length === 0
+            ) {
+                const alliesAlive = ships.filter(
+                    (s) => s.faction === "ally" && s.alive,
+                ).length;
+                const desiredRaw = alliesAlive + randInt(-1, 1);
+                const target = Math.max(alliesAlive, desiredRaw, 7);
+                const spawnEnemies = target;
+                const spawnAllies = Math.max(0, target - alliesAlive);
+                const currentAsteroids = asteroids.length;
+                const targetAsteroids = randInt(25, 30);
+                const need = Math.max(0, targetAsteroids - currentAsteroids);
+                if (need > 0) spawnAsteroids(need);
+                wave += 1;
+                spawnWave(spawnEnemies, spawnAllies);
+                message = `WAVE ${wave}!`;
+                if (player && player.alive)
+                    floatingTexts.push(
+                        new FloatingText(
+                            player.x,
+                            player.y - 100,
+                            `WAVE ${wave}`,
+                            "#00f0ff",
+                            2.0,
+                            damageTextBaseSize * 1.5,
+                        ),
+                    );
+            }
+            fpsFrames += 1;
+            fpsAccum += dt;
+            if (fpsAccum >= 1.0) {
+                fpsDisplay = Math.round(fpsFrames / fpsAccum);
+                fpsFrames = 0;
+                fpsAccum = 0;
+            }
+        }
+
+        /* ========== 描画ルーチン ========== */
+        let starCaches = [];
+        let starCacheNeedsRegen = true;
+        let lastStarVW = 0,
+            lastStarVH = 0;
+        let GameFrames = 0;
+        function regenStarCaches(vw, vh) {
+            starCaches = [];
+            lastStarVW = vw;
+            lastStarVH = vh;
+            starCacheNeedsRegen = false;
+            const totalBase = lightweightMode ? 1000 : 1600;
+            for (let li = 0; li < STAR_LAYERS.length; li++) {
+                const layerFactor = 1 + li * 0.4;
+                const count = Math.max(
+                    8,
+                    Math.floor((totalBase * layerFactor) / STAR_LAYERS.length),
+                );
+                const arr = [];
+                for (let i = 0; i < count; i++) {
+                    const colRoll = Math.random();
+                    const alpha = rand(0.45, 1.0);
+                    const color =
+                        colRoll < 0.33
+                            ? `rgba(138,173,221,${alpha})`
+                            : colRoll < 0.66
+                                ? `rgba(222,239,255,${alpha})`
+                                : `rgba(255,255,255,${alpha})`;
+                    const size = lightweightMode
+                        ? Math.random() * 3.0 + 1.0
+                        : Math.random() * 3.0 + 1.0;
+                    arr.push({
+                        x: Math.floor(Math.random() * WORLD_W),
+                        y: Math.floor(Math.random() * WORLD_H),
+                        size: Math.max(1, Math.round(size)),
+                        color,
+                    });
+                }
+                starCaches.push(arr);
+            }
+        }
+
+        function drawStars(ctx, w, h, camX, camY, vLeft, vRight, vTop, vBottom) {
+            if (!showStars) return;
+            if (
+                !starCaches ||
+                starCaches.length !== STAR_LAYERS.length ||
+                starCacheNeedsRegen ||
+                lastStarVW !== w ||
+                lastStarVH !== h
+            ) {
+                regenStarCaches(w, h);
+            }
+            ctx.save();
+            for (let li = 0; li < STAR_LAYERS.length; li++) {
+                const par = STAR_LAYERS[li];
+                ctx.globalAlpha = lightweightMode
+                    ? 0.6 + li * 0.08
+                    : 0.25 + li * 0.15;
+                const arr = starCaches[li] || [];
+                for (let si = 0; si < arr.length; si++) {
+                    const s = arr[si];
+                    const sc = toScreen(s.x, s.y, camX * par, camY * par, w, h);
+                    if (
+                        sc.sx < vLeft - 8 ||
+                        sc.sx > vRight + 8 ||
+                        sc.sy < vTop - 8 ||
+                        sc.sy > vBottom + 8
+                    )
+                        continue;
+                    ctx.fillStyle = s.color;
+                    ctx.fillRect(Math.round(sc.sx), Math.round(sc.sy), s.size, s.size);
+                }
+            }
+            ctx.restore();
+            ctx.globalAlpha = 1;
+        }
+
+        function render() {
+            GameFrames++;
+            const vw = canvas.width / dpr,
+                vh = canvas.height / dpr;
+            ctx.fillStyle = "#050510";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.save();
+            ctx.translate(vw / 2, vh / 2);
+            ctx.scale(zoomLevel, zoomLevel);
+            ctx.translate(-vw / 2, -vh / 2);
+            const halfVisW = vw / 2 / zoomLevel;
+            const halfVisH = vh / 2 / zoomLevel;
+            const vLeft = vw / 2 - halfVisW;
+            const vRight = vw / 2 + halfVisW;
+            const vTop = vh / 2 - halfVisH;
+            const vBottom = vh / 2 + halfVisH;
+
+            if (cameraShake > 0) {
+                const sx = (rand(-cameraShake, cameraShake) * dpr) / zoomLevel;
+                const sy = (rand(-cameraShake, cameraShake) * dpr) / zoomLevel;
+                ctx.translate(sx, sy);
+            }
+            const player = ships.find((s) => s.id === playerId);
+            const camX = player?.x ?? 0;
+            const camY = player?.y ?? 0;
+            if (showStars)
+                drawStars(ctx, vw, vh, camX, camY, vLeft, vRight, vTop, vBottom);
+
+            let drawnAsteroids = 0;
+            for (const a of asteroids) {
+                if (drawnAsteroids >= ASTEROID_DRAW_LIMIT) break;
+                const sc = toScreen(a.x, a.y, camX, camY, vw, vh);
+                if (
+                    sc.sx < vLeft - a.r - 10 ||
+                    sc.sx > vRight + a.r + 10 ||
+                    sc.sy < vTop - a.r - 10 ||
+                    sc.sy > vBottom + a.r + 10
+                )
+                    continue;
+                drawAsteroid(ctx, a, sc.sx, sc.sy);
+                drawnAsteroids++;
+            }
+
+            for (const pu of powerups) {
+                const sc = toScreen(pu.x, pu.y, camX, camY, vw, vh);
+                if (
+                    sc.sx < vLeft - 20 ||
+                    sc.sx > vRight + 20 ||
+                    sc.sy < vTop - 20 ||
+                    sc.sy > vBottom + 20
+                )
+                    continue;
+                ctx.save();
+                ctx.translate(sc.sx, sc.sy);
+                ctx.rotate(pu.rotation);
+                if (pu.life < 3.0 && Math.floor(pu.life * 10) % 2 === 0)
+                    ctx.globalAlpha = 0.3;
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = pu.color;
+                ctx.strokeStyle = pu.color;
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(0, -pu.radius);
+                ctx.lineTo(pu.radius, 0);
+                ctx.lineTo(0, pu.radius);
+                ctx.lineTo(-pu.radius, 0);
+                ctx.closePath();
+                ctx.stroke();
+                ctx.fillStyle = pu.color;
+                ctx.beginPath();
+                ctx.arc(0, 0, 5, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+
+            ctx.save();
+            for (const b of bullets) {
+                const sc = toScreen(b.x, b.y, camX, camY, vw, vh);
+                const ang = Math.atan2(b.vy, b.vx);
+                const owner = ships.find((s) => s.id === b.owner);
+                let col = "#ffd";
+                if (owner) {
+                    if (owner.id === playerId && gameOverMode) col = "#888";
+                    else
+                        col =
+                            window.isMultiplayer || window._testPlayMode
+                                ? TEAM_COLORS[owner.team]
+                                : owner.team === 3
+                                    ? TEAM_COLORS[3]
+                                    : owner.id === playerId
+                                        ? TEAM_COLORS[1]
+                                        : TEAM_COLORS[2];
+                }
+                if (
+                    sc.sx < vLeft - 60 ||
+                    sc.sx > vRight + 60 ||
+                    sc.sy < vTop - 60 ||
+                    sc.sy > vBottom + 60
+                )
+                    continue;
+                ctx.globalAlpha = 0.95;
+                ctx.strokeStyle = col;
+                ctx.lineWidth = b.width || 3;
+                const x1 = sc.sx,
+                    y1 = sc.sy,
+                    x2 = x1 - Math.cos(ang) * (b.length || 48),
+                    y2 = y1 - Math.sin(ang) * (b.length || 48);
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.stroke();
+                if (DRAW_GLOW && showGlow) {
+                    ctx.globalCompositeOperation = "lighter";
+                    ctx.strokeStyle = col;
+                    ctx.globalAlpha = 0.12;
+                    ctx.lineWidth = (b.width || 3) * 6;
+                    ctx.beginPath();
+                    ctx.moveTo(x1, y1);
+                    ctx.lineTo(x2, y2);
+                    ctx.stroke();
+                    ctx.globalCompositeOperation = "source-over";
+                }
+            }
+            ctx.restore();
+
+            const particleDrawCount = !showParticles
+                ? 0
+                : lightweightMode
+                    ? Math.min(particles.length, PARTICLE_DRAW_LIMIT)
+                    : particles.length;
+            for (let pi = 0; pi < particleDrawCount; pi++) {
+                const p = particles[pi];
+                const sc = toScreen(p.x, p.y, camX, camY, vw, vh);
+                if (
+                    sc.sx < vLeft - 30 ||
+                    sc.sx > vRight + 30 ||
+                    sc.sy < vTop - 30 ||
+                    sc.sy > vBottom + 30
+                )
+                    continue;
+                const t = 1 - p.life / p.maxLife;
+                if (p.isGhost) {
+                    ctx.save();
+                    ctx.translate(sc.sx, sc.sy);
+                    ctx.rotate(p.angle);
+                    const scalePhase = 1.0 + t * 0.5;
+                    ctx.scale(scalePhase, scalePhase);
+                    const gCol = p.color || "#00f0ff";
+                    ctx.globalAlpha = 1 - t;
+                    ctx.strokeStyle = gCol;
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    ctx.moveTo(20, 0);
+                    ctx.lineTo(5, -6);
+                    ctx.lineTo(-5, -16);
+                    ctx.lineTo(-15, -16);
+                    ctx.lineTo(-10, -5);
+                    ctx.lineTo(-20, -8);
+                    ctx.lineTo(-20, -3);
+                    ctx.lineTo(-15, 0);
+                    ctx.lineTo(-20, 3);
+                    ctx.lineTo(-20, 8);
+                    ctx.lineTo(-10, 5);
+                    ctx.lineTo(-15, 16);
+                    ctx.lineTo(-5, 16);
+                    ctx.lineTo(5, 6);
+                    ctx.closePath();
+                    ctx.stroke();
+                    ctx.restore();
+                } else {
+                    ctx.globalAlpha = 1 - t;
+                    ctx.beginPath();
+                    ctx.arc(sc.sx, sc.sy, p.size * (1 + t * 2), 0, TAU);
+                    if (p.smoke) {
+                        ctx.fillStyle = `rgba(160,160,170,${Math.max(0.05, 0.9 * (1 - t))})`;
+                    } else {
+                        ctx.fillStyle = t < 0.5 ? "#fbe" : "#fec";
+                    }
+                    ctx.fill();
+                    ctx.globalAlpha = 1;
+                }
+            }
+
+            for (const s of ships) {
+                if (!s.alive && !(s.id === playerId && gameOverMode) && !s.isGhost)
+                    continue;
+                const sc = toScreen(s.x, s.y, camX, camY, vw, vh);
+                if (
+                    sc.sx < vLeft - 40 ||
+                    sc.sx > vRight + 40 ||
+                    sc.sy < vTop - 40 ||
+                    sc.sy > vBottom + 40
+                )
+                    continue;
+                drawShip(ctx, s, sc.sx, sc.sy);
+            }
+
+            for (const ft of floatingTexts) {
+                const sc = toScreen(ft.x, ft.y, camX, camY, vw, vh);
+                if (
+                    sc.sx < vLeft - 40 ||
+                    sc.sx > vRight + 40 ||
+                    sc.sy < vTop - 40 ||
+                    sc.sy > vBottom + 40
+                )
+                    continue;
+                ctx.save();
+                ctx.globalAlpha = Math.max(0, ft.life / ft.maxLife);
+                ctx.fillStyle = ft.color;
+                if (showGlow) {
+                    ctx.shadowColor = ft.color;
+                    ctx.shadowBlur = 8;
+                }
+                ctx.font = `bold ${ft.size}px Arial`;
+                ctx.textAlign = "center";
+                ctx.fillText(ft.text, sc.sx, sc.sy);
+                ctx.restore();
+            }
+
+            ctx.restore();
+            drawUI(ctx, vLeft, vRight, vTop, vBottom);
+        }
+
+        function drawAsteroid(ctx, a, sx, sy) {
+            ctx.save();
+            ctx.translate(sx, sy);
+            ctx.rotate(a.rot);
+            ctx.strokeStyle = "#aab";
+            ctx.fillStyle = "#556";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            const spikes = a.spikes || 10,
+                r = a.r;
+            for (let i = 0; i < spikes; i++) {
+                const ang = (i / spikes) * TAU;
+                const offset =
+                    a.offsets && a.offsets[i]
+                        ? a.offsets[i]
+                        : 0.7 + 0.5 * Math.sin(i * 2.3);
+                const rr = r * offset;
+                const x = Math.cos(ang) * rr,
+                    y = Math.sin(ang) * rr;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        function drawShip(ctx, s, sx, sy) {
+            ctx.save();
+            ctx.translate(sx, sy);
+            ctx.rotate(s.angle);
+            let base =
+                window.isMultiplayer || window._testPlayMode
+                    ? TEAM_COLORS[s.team]
+                    : s.id === playerId
+                        ? TEAM_COLORS[1]
+                        : s.team === 3
+                            ? TEAM_COLORS[3]
+                            : TEAM_COLORS[2];
+
+            if (
+                (s.id === playerId && gameOverMode) ||
+                s.invulnerable ||
+                s.isGhost
+            ) {
+                base = "rgba(100,100,100,0.5)";
+            }
+            const roll = s.rollPhase;
+            ctx.scale(1, 1 + Math.sin(roll) * 0.05);
+
+            if (showGlow && !s.isGhost && DRAW_GLOW) {
+                ctx.shadowColor = base;
+                ctx.shadowBlur = 10;
+            }
+
+            // 王道でかっこいいSF戦闘機デザイン
+            ctx.fillStyle = "rgba(10, 15, 25, 0.95)";
+            ctx.strokeStyle = base;
+            ctx.lineWidth = 1.5;
+
+            ctx.beginPath();
+            ctx.moveTo(24, 0); // 機首先端
+            ctx.lineTo(10, -4); // 機首サイド
+            ctx.lineTo(4, -6); // 主翼付け根前
+            ctx.lineTo(-4, -20); // 主翼先端前
+            ctx.lineTo(-12, -20); // 主翼先端後
+            ctx.lineTo(-8, -6); // 主翼付け根後
+            ctx.lineTo(-18, -12); // 尾翼先端
+            ctx.lineTo(-20, -4); // スラスター外側
+            ctx.lineTo(-16, 0); // スラスター中央
+            ctx.lineTo(-20, 4); // スラスター外側
+            ctx.lineTo(-18, 12); // 尾翼先端
+            ctx.lineTo(-8, 6); // 主翼付け根後
+            ctx.lineTo(-12, 20); // 主翼先端後
+            ctx.lineTo(-4, 20); // 主翼先端前
+            ctx.lineTo(4, 6); // 主翼付け根前
+            ctx.lineTo(10, 4); // 機首サイド
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+            // キャノピー（操縦席のガラス部分）
+            ctx.beginPath();
+            ctx.moveTo(10, 0);
+            ctx.lineTo(2, -3);
+            ctx.lineTo(-6, 0);
+            ctx.lineTo(2, 3);
+            ctx.closePath();
+            ctx.fillStyle = "rgba(200, 255, 255, 0.15)";
+            ctx.fill();
+            ctx.stroke();
+
+            // 翼のパネルライン（アクセント）
+            ctx.beginPath();
+            ctx.moveTo(0, -5);
+            ctx.lineTo(-8, -16);
+            ctx.moveTo(0, 5);
+            ctx.lineTo(-8, 16);
+            ctx.stroke();
+            // パワーアップリングは自機の回転を打ち消して描画（12時位置が常に上）
+            ctx.rotate(-s.angle);
+            if (
+                s.weaponType > 0 &&
+                s.weaponStartTime &&
+                s.weaponDuration &&
+                !s.isGhost
+            ) {
+                const elapsed = performance.now() - s.weaponStartTime;
+                const ratio = Math.max(0, 1 - elapsed / s.weaponDuration);
+                const ringColor = s.weaponType === 1 ? "#00f0ff" : "#ff00ff";
+                const pulse = 0.6 + Math.sin(performance.now() / 200) * 0.15;
+                // 外側リング(タイマー連動アーク、12時から時計回りに消える)
+                ctx.beginPath();
+                ctx.arc(0, 0, 30, -Math.PI / 2, -Math.PI / 2 + TAU * ratio);
+                ctx.strokeStyle = ringColor;
+                ctx.lineWidth = 2.5;
+                ctx.globalAlpha = pulse;
+                ctx.stroke();
+                // グロー
+                if (showGlow && DRAW_GLOW) {
+                    ctx.beginPath();
+                    ctx.arc(0, 0, 30, -Math.PI / 2, -Math.PI / 2 + TAU * ratio);
+                    ctx.strokeStyle = ringColor;
+                    ctx.lineWidth = 8;
+                    ctx.globalAlpha = 0.12;
+                    ctx.stroke();
+                }
+                ctx.globalAlpha = 1;
+            }
+            // HP回復リングエフェクト（拡大フェードアウト）
+            if (s.healRing) {
+                const hr = s.healRing;
+                const t = 1 - hr.life / hr.maxLife;
+                const radius = 20 + t * 50;
+                const alpha = (1 - t) * 0.7;
+                ctx.beginPath();
+                ctx.arc(0, 0, radius, 0, TAU);
+                ctx.strokeStyle = hr.color;
+                ctx.lineWidth = 3 * (1 - t);
+                ctx.globalAlpha = alpha;
+                ctx.stroke();
+                if (showGlow && DRAW_GLOW) {
+                    ctx.beginPath();
+                    ctx.arc(0, 0, radius, 0, TAU);
+                    ctx.strokeStyle = hr.color;
+                    ctx.lineWidth = 12 * (1 - t);
+                    ctx.globalAlpha = alpha * 0.3;
+                    ctx.stroke();
+                }
+                ctx.globalAlpha = 1;
+            }
+            ctx.rotate(s.angle);
+
+            ctx.rotate(-s.angle);
+            ctx.translate(-sx, -sy);
+
+            // HPバー
+            if (!s.isGhost) {
+                ctx.shadowBlur = 0;
+                ctx.globalAlpha = 0.8;
+                const hpw = 34,
+                    hpx = sx - hpw / 2,
+                    hpy = sy - 30;
+                ctx.fillStyle = "rgba(0,0,0,0.8)";
+                ctx.fillRect(hpx - 1, hpy - 1, hpw + 2, 5);
+                ctx.fillStyle = "#222";
+                ctx.fillRect(hpx, hpy, hpw, 3);
+                ctx.fillStyle = base;
+                ctx.fillRect(hpx, hpy, hpw * (Math.max(0, s.hp) / s.maxHp), 3);
+                ctx.globalAlpha = 1;
+            }
+
+            if (s.isGhost && s.id === playerId) {
+                ctx.fillStyle = "#aaa";
+                ctx.font = "bold 11px ui-monospace, monospace";
+                ctx.fillText("SPECTATING", sx - 35, sy - 20);
+            }
+
+            // プレイヤー名の表示 (マルチプレイ時)
+            if (
+                window.isMultiplayer &&
+                (s.faction === "player" || s.isRemotePlayer) &&
+                !s.isGhost
+            ) {
+                let name = "UNKNOWN";
+                if (s.id === playerId) {
+                    name = localStorage.getItem("playerNickname_v1") || "YOU";
+                } else if (photonClient && photonClient.myRoomActors()) {
+                    const actId = s.id.split("_")[1];
+                    if (actId && photonClient.myRoomActors()[actId]) {
+                        name =
+                            photonClient.myRoomActors()[actId].getCustomProperty("name") ||
+                            `PILOT ${actId}`;
+                    }
+                }
+                ctx.fillStyle = base;
+                ctx.font = "bold 11px ui-monospace, monospace";
+                ctx.textAlign = "center";
+                ctx.shadowColor = "#000";
+                ctx.shadowBlur = 4;
+                ctx.fillText(name, sx, sy - 38);
+                ctx.shadowBlur = 0;
+                ctx.textAlign = "start";
+            }
+
+            ctx.restore();
+        }
+
+        function drawUI(ctx, vLeft, vRight, vTop, vBottom) {
+            const vw = canvas.width / dpr,
+                vh = canvas.height / dpr;
+            ctx.save();
+            ctx.fillStyle = "#fff";
+            ctx.font =
+                "16px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+            ctx.shadowColor = "#00f0ff";
+            ctx.shadowBlur = 8;
+            if (!window.isMultiplayer)
+                ctx.fillText(`SCORE ${String(score).padStart(6, "0")}`, 20, 36);
+            ctx.fillText(`LIVES ${lives}`, 20, window.isMultiplayer ? 36 : 60);
+            if (!window.isMultiplayer) ctx.fillText(`WAVE ${wave}`, 20, 84);
+            ctx.shadowBlur = 0;
+
+            const p = ships.find((s) => s.id === playerId);
+            if (p && !p.isGhost) {
+                const x = 20,
+                    y = window.isMultiplayer ? 60 : 108,
+                    w2 = 160,
+                    h2 = 8;
+                ctx.fillStyle = "rgba(0,0,0,0.6)";
+                ctx.fillRect(x - 2, y - 2, w2 + 4, h2 + 4);
+                ctx.fillStyle = "#222";
+                ctx.fillRect(x, y, w2, h2);
+                const t = p.heat / p.maxHeat;
+                ctx.fillStyle = t > 0.8 ? "#ff0055" : t > 0.5 ? "#ffb300" : "#00f0ff";
+                if (showGlow) {
+                    ctx.shadowColor = ctx.fillStyle;
+                    ctx.shadowBlur = 5;
+                }
+                ctx.fillRect(x, y, w2 * t, h2);
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = "#fff";
+                ctx.font = "12px ui-monospace, monospace";
+                ctx.fillText("HEAT", x, y - 6);
+                if (p.weaponTimer > 0) {
+                    ctx.fillStyle = p.weaponType === 1 ? "#00f0ff" : "#f0f";
+                    ctx.fillText(`WPN: ${Math.ceil(p.weaponTimer)}s`, x, y + 24);
+                }
+            }
+
+            if (showHelp) {
+                const lines = [message];
+                const boxW = Math.min(700, vw - 40),
+                    boxH = 40,
+                    bx = vw / 2 - boxW / 2,
+                    by = 20;
+                ctx.fillStyle = "rgba(0, 10, 20, 0.7)";
+                ctx.fillRect(bx - 8, by - 8, boxW + 16, boxH + 16);
+                ctx.strokeStyle = "rgba(0,240,255,0.4)";
+                ctx.strokeRect(bx - 8, by - 8, boxW + 16, boxH + 16);
+                ctx.fillStyle = "#00f0ff";
+                ctx.shadowColor = "#00f0ff";
+                ctx.shadowBlur = 5;
+                lines.forEach((ln, i) => ctx.fillText(ln, bx, by + 24 + i * 22));
+                ctx.shadowBlur = 0;
+            }
+
+            if (isPaused) {
+                ctx.fillStyle = "rgba(0, 5, 10, 0.6)";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                const isAnyModalOpen = Array.from(
+                    document.querySelectorAll(".game-modal"),
+                ).some((m) => m.style.display === "block");
+                if (!isAnyModalOpen) {
+                    const txt = "PAUSED";
+                    ctx.font = "bold 36px ui-monospace, monospace";
+                    const m = ctx.measureText(txt);
+                    ctx.fillStyle = "#00f0ff";
+                    ctx.shadowColor = "#00f0ff";
+                    ctx.shadowBlur = 10;
+                    ctx.fillText(txt, vw / 2 - m.width / 2, vh / 2);
+                    ctx.shadowBlur = 0;
+                }
+            }
+
+            ctx.restore();
+            const _myRef = ships.find((s) => s.id === playerId) || {
+                id: playerId,
+                faction: "player",
+                team: getMyTeam(),
+            };
+            const enemiesAlive = ships.filter(
+                (s) =>
+                    areEnemies(_myRef, s) &&
+                    ((s.alive && !s.isGhost) || (s.lives !== undefined && s.lives > 0)),
+            ).length;
+            const alliesAlive = ships.filter(
+                (s) =>
+                    !areEnemies(_myRef, s) &&
+                    ((s.alive && !s.isGhost) ||
+                        (s.lives !== undefined && s.lives > 0) ||
+                        (s.id === playerId && lives > 0)),
+            ).length;
+            ctx.save();
+            ctx.fillStyle = "#00f0ff";
+            ctx.font = "16px ui-monospace, monospace";
+            ctx.shadowColor = "#00f0ff";
+            ctx.shadowBlur = 8;
+            ctx.fillText(
+                `ENEMIES ${String(enemiesAlive).padStart(3, " ")}`,
+                Math.max(16, vw - 180),
+                36,
+            );
+            ctx.fillText(
+                `ALLIES ${String(alliesAlive).padStart(3, " ")}`,
+                Math.max(16, vw - 180),
+                60,
+            );
+            ctx.restore();
+
+            const cam = ships.find((s) => s.id === playerId) || {
+                x: WORLD_W / 2,
+                y: WORLD_H / 2,
+            };
+            const margin = 24;
+            const hw = vw / 2 - margin,
+                hh = vh / 2 - margin;
+            for (const en of ships.filter(
+                (s) => areEnemies(_myRef, s) && s.alive && !s.isGhost,
+            )) {
+                const d = torusDelta(en.x, en.y, cam.x, cam.y);
+                const sx = d.dx + vw / 2,
+                    sy = d.dy + vh / 2;
+                if (
+                    vLeft !== undefined &&
+                    sx >= vLeft &&
+                    sx <= vRight &&
+                    sy >= vTop &&
+                    sy <= vBottom
+                )
+                    continue;
+                const ang = Math.atan2(d.dy, d.dx);
+                const c = Math.cos(ang),
+                    s = Math.sin(ang);
+                const eps = 1e-6;
+                const scale = Math.min(
+                    Math.abs(c) > eps ? hw / Math.abs(c) : 1e6,
+                    Math.abs(s) > eps ? hh / Math.abs(s) : 1e6,
+                );
+                const px = vw / 2 + c * scale,
+                    py = vh / 2 + s * scale;
+                ctx.save();
+                ctx.translate(px, py);
+                ctx.rotate(ang);
+                ctx.globalAlpha = 0.9;
+                const col =
+                    window.isMultiplayer || window._testPlayMode
+                        ? TEAM_COLORS[en.team]
+                        : TEAM_COLORS[2];
+                ctx.fillStyle = col;
+                if (showGlow) {
+                    ctx.shadowColor = col;
+                    ctx.shadowBlur = 10;
+                }
+                ctx.beginPath();
+                ctx.moveTo(16, 0);
+                ctx.lineTo(-8, 10);
+                ctx.lineTo(-4, 0);
+                ctx.lineTo(-8, -10);
+                ctx.closePath();
+                ctx.fill();
+                ctx.restore();
+            }
+            for (const al of ships.filter(
+                (s) =>
+                    !areEnemies(_myRef, s) &&
+                    s.id !== playerId &&
+                    s.alive &&
+                    !s.isGhost,
+            )) {
+                const d = torusDelta(al.x, al.y, cam.x, cam.y);
+                const sx = d.dx + vw / 2,
+                    sy = d.dy + vh / 2;
+                if (
+                    vLeft !== undefined &&
+                    sx >= vLeft &&
+                    sx <= vRight &&
+                    sy >= vTop &&
+                    sy <= vBottom
+                )
+                    continue;
+                const ang = Math.atan2(d.dy, d.dx);
+                const c = Math.cos(ang),
+                    s = Math.sin(ang);
+                const eps = 1e-6;
+                const scale = Math.min(
+                    Math.abs(c) > eps ? hw / Math.abs(c) : 1e6,
+                    Math.abs(s) > eps ? hh / Math.abs(s) : 1e6,
+                );
+                const px = vw / 2 + c * scale,
+                    py = vh / 2 + s * scale;
+                ctx.save();
+                ctx.translate(px, py);
+                ctx.rotate(ang);
+                ctx.globalAlpha = 0.9;
+                const col =
+                    window.isMultiplayer || window._testPlayMode
+                        ? TEAM_COLORS[al.team]
+                        : al.faction === "ally"
+                            ? TEAM_COLORS[3]
+                            : TEAM_COLORS[1];
+                ctx.fillStyle = col;
+                if (showGlow) {
+                    ctx.shadowColor = col;
+                    ctx.shadowBlur = 10;
+                }
+                ctx.beginPath();
+                ctx.moveTo(16, 0);
+                ctx.lineTo(-8, 10);
+                ctx.lineTo(-4, 0);
+                ctx.lineTo(-8, -10);
+                ctx.closePath();
+                ctx.fill();
+                ctx.restore();
+            }
+
+            ctx.save();
+            ctx.font = "14px ui-monospace, monospace";
+            const fpsText = `FPS ${String(fpsDisplay).padStart(2, " ")}`;
+            const metrics = ctx.measureText(fpsText);
+            ctx.fillStyle = "rgba(0,0,0,0.6)";
+            ctx.fillRect(vw - metrics.width - 16, vh - 28, metrics.width + 12, 22);
+            ctx.fillStyle = "#00f0ff";
+            ctx.fillText(fpsText, vw - metrics.width - 10, vh - 12);
+            ctx.restore();
+
+            if (showMinimap) {
+                const mapW = 140,
+                    mapH = 140;
+                const mapX = 12,
+                    mapY = vh - mapH - 12;
+                ctx.save();
+                ctx.globalAlpha = 0.95;
+                ctx.fillStyle = "rgba(0,10,20,0.7)";
+                ctx.fillRect(mapX - 4, mapY - 4, mapW + 8, mapH + 8);
+                ctx.strokeStyle = "rgba(0,240,255,0.4)";
+                ctx.strokeRect(mapX - 4, mapY - 4, mapW + 8, mapH + 8);
+                const sx = mapW / WORLD_W,
+                    sy = mapH / WORLD_H;
+                if (showMinimapAsteroids) {
+                    for (const a of asteroids) {
+                        ctx.fillStyle = "rgba(100,160,160,0.9)";
+                        ctx.fillRect(
+                            mapX + (a.x % WORLD_W) * sx - 1,
+                            mapY + (a.y % WORLD_H) * sy - 1,
+                            2,
+                            2,
+                        );
+                    }
+                }
+                for (const al of ships.filter(
+                    (s) =>
+                        !areEnemies(_myRef, s) &&
+                        s.alive &&
+                        !s.isGhost &&
+                        s.id !== playerId,
+                )) {
+                    ctx.fillStyle =
+                        window.isMultiplayer || window._testPlayMode
+                            ? TEAM_COLORS[al.team]
+                            : al.faction === "ally"
+                                ? TEAM_COLORS[3]
+                                : TEAM_COLORS[1];
+                    ctx.fillRect(
+                        mapX + (al.x % WORLD_W) * sx - 2,
+                        mapY + (al.y % WORLD_H) * sy - 2,
+                        4,
+                        4,
+                    );
+                }
+                for (const en of ships.filter(
+                    (s) => areEnemies(_myRef, s) && s.alive && !s.isGhost,
+                )) {
+                    ctx.fillStyle =
+                        window.isMultiplayer || window._testPlayMode
+                            ? TEAM_COLORS[en.team]
+                            : TEAM_COLORS[2];
+                    ctx.fillRect(
+                        mapX + (en.x % WORLD_W) * sx - 2,
+                        mapY + (en.y % WORLD_H) * sy - 2,
+                        4,
+                        4,
+                    );
+                }
+                if (p) {
+                    ctx.fillStyle =
+                        window.isMultiplayer || window._testPlayMode
+                            ? TEAM_COLORS[p.team]
+                            : TEAM_COLORS[1];
+                    ctx.beginPath();
+                    ctx.arc(
+                        mapX + (p.x % WORLD_W) * sx,
+                        mapY + (p.y % WORLD_H) * sy,
+                        4,
+                        0,
+                        TAU,
+                    );
+                    ctx.fill();
+                }
+                ctx.globalAlpha = 1;
+                ctx.restore();
+            }
+        }
+
+        /* ========== ヘルパー ========== */
+        function attemptShoot(s, target) {
+            if (s.shootTimer > 0 || s.heat > s.maxHeat - AI_SHOT_RESERVE) return;
+            const diff = s.ai?.difficulty || "normal";
+            if (diff === "easy") {
+                // Easy: 照準にランダムオフセットを追加
+                const savedAngle = s.angle;
+                s.angle += rand(-0.15, 0.15);
+                fireBullet(s, 47, 7, 0.6);
+                s.angle = savedAngle;
+            } else {
+                fireBullet(s, 47, 7, diff === "hard" ? 0.2 : 0.45);
+            }
+            s.heat += diff === "hard" ? 8 : 10;
+            s.shootTimer = s.shootCd / 1000;
+        }
+        function respawnPlayer() {
+            for (let i = ships.length - 1; i >= 0; i--) {
+                if (ships[i].id === playerId) ships.splice(i, 1);
+            }
+            const p = {
+                id: playerId,
+                faction: "player",
+                team: getMyTeam(),
+                x: WORLD_W / 2,
+                y: WORLD_H / 2,
+                vx: 0,
+                vy: 0,
+                angle: -Math.PI / 2,
+                turnSpeed: 0.07,
+                thrust: 0.12,
+                maxSpeed: 6,
+                drag: 0.005,
+                heat: 0,
+                maxHeat: 100,
+                boosting: false,
+                boostTimer: 0,
+                shootCd: 100,
+                shootTimer: 0,
+                alive: true,
+                isGhost: false,
+                hp: 250,
+                maxHp: 250,
+                scoreValue: 0,
+                rollPhase: 0,
+                ai: null,
+                weaponType: 0,
+                weaponTimer: 0,
+            };
+            ships.push(p);
+        }
+        function respawnMultiplayerPlayer() {
+            if (matchEnded || !running || !window.isMultiplayer) return;
+            const p = ships.find((s) => s.id === playerId);
+            if (!p) return;
+            let mX = WORLD_W / 2,
+                mY = WORLD_H / 2;
+            if (photonClient) {
+                const myActorNr = photonClient.myActor().actorNr;
+                if (
+                    window.currentRoomSettings.spawns &&
+                    window.currentRoomSettings.spawns[myActorNr]
+                ) {
+                    mX = window.currentRoomSettings.spawns[myActorNr].x;
+                    mY = window.currentRoomSettings.spawns[myActorNr].y;
+                } else {
+                    mX =
+                        photonClient.myActor().getCustomProperty("spawnX") || WORLD_W / 2;
+                    mY =
+                        photonClient.myActor().getCustomProperty("spawnY") || WORLD_H / 2;
+                }
+            }
+            p.x = wrap(mX + rand(-50, 50), WORLD_W);
+            p.y = wrap(mY + rand(-50, 50), WORLD_H);
+            p.vx = 0;
+            p.vy = 0;
+            p.hp = p.maxHp;
+            p.heat = 0;
+            p.alive = true;
+            p.isGhost = false;
+            p.weaponType = 0;
+            p.weaponStartTime = 0;
+            p.weaponDuration = 0;
+        }
+        function respawnAI(s) {
+            if (matchEnded || !running || !window.isMultiplayer) return;
+            s.hp = s.maxHp;
+            s.alive = true;
+            s.isGhost = false;
+            s.heat = 0;
+            s.vx = 0;
+            s.vy = 0;
+            const pSpawns = [];
+            const actors = photonClient.myRoomActors();
+            for (let aId in actors) {
+                if (actors[aId].getCustomProperty("team") === s.team) {
+                    let px = actors[aId].getCustomProperty("spawnX") || WORLD_W / 2;
+                    let py = actors[aId].getCustomProperty("spawnY") || WORLD_H / 2;
+                    if (
+                        window.currentRoomSettings.spawns &&
+                        window.currentRoomSettings.spawns[aId]
+                    ) {
+                        px = window.currentRoomSettings.spawns[aId].x;
+                        py = window.currentRoomSettings.spawns[aId].y;
+                    }
+                    pSpawns.push({ x: px, y: py });
+                }
+            }
+            if (pSpawns.length > 0) {
+                const base = pSpawns[randInt(0, pSpawns.length - 1)];
+                s.x = wrap(base.x + rand(-300, 300), WORLD_W);
+                s.y = wrap(base.y + rand(-300, 300), WORLD_H);
+            } else {
+                s.x = rand(0, WORLD_W);
+                s.y = rand(0, WORLD_H);
+            }
+        }
+
+        /* ========== メインループ ========== */
+        function frame(t) {
+            const dt = Math.min(1 / 30, (t - last) / 1000);
+            last = t;
+            if (running) {
+                update(dt);
+            } else {
+                if (cameraShake > 0) {
+                    cameraShake *= 0.9;
+                    if (cameraShake < 0.5) cameraShake = 0;
+                }
+            }
+            render();
+            requestAnimationFrame(frame);
+        }
+
+        /* ========== UI実装 ========== */
+        const keymapModal = document.getElementById("keymapModal");
+        const kmListDiv = document.getElementById("km-list");
+        const closeKeymapBtn = document.getElementById("closeKeymap");
+        const resetDefaultsBtn = document.getElementById("resetDefaults");
+        const bindingNoticeDiv = document.getElementById("bindingNotice");
+        const pauseSettingsMenu = document.getElementById("pauseSettingsMenu");
+        const openKeymapFromMenuBtn = document.getElementById("openKeymapFromMenu");
+        const closePauseSettingsBtn = document.getElementById("closePauseSettings");
+        const lightweightToggle = document.getElementById("lightweightToggle");
+        const changeNicknameBtn = document.getElementById("changeNicknameBtn");
+        const toggleAllElem = document.getElementById("toggleAll");
+        const toggleStarsElem = document.getElementById("toggleStars");
+        const toggleMinimapElem = document.getElementById("toggleMinimap");
+        const toggleParticlesElem = document.getElementById("toggleParticles");
+        const toggleGlowElem = document.getElementById("toggleGlow");
+        const toggleMinimapAsteroidsElem = document.getElementById("toggleMinimapAsteroids");
+        const toggleDamageElem = document.getElementById("toggleDamage");
+        const toggleShakeElem = document.getElementById("toggleShake");
+        const toggleControlModeElem = document.getElementById("toggleControlMode");
+        const toggleTouchUIElem = document.getElementById("toggleTouchUI");
+        const toggleFullscreenElem = document.getElementById("toggleFullscreen");
+
+        const bgmVolumeSlider = document.getElementById("bgmVolume");
+        const sfxVolumeSlider = document.getElementById("sfxVolume");
+        const damageTextSizeSlider = document.getElementById(
+            "damageTextSizeSlider",
+        );
+        const toggleBoostSoundElem = document.getElementById("toggleBoostSound");
+
+        const btnOpenSettingsView = document.getElementById("btnOpenSettingsView");
+        const pauseMainView = document.getElementById("pauseMainView");
+        const pauseSettingsView = document.getElementById("pauseSettingsView");
+        const btnBackToPauseMain = document.getElementById("btnBackToPauseMain");
+
+        // タブ切り替えロジック
+        const settingsTabs = document.querySelectorAll(".settings-tab");
+        const settingsTabContents = document.querySelectorAll(".settings-tab-content");
+        settingsTabs.forEach(tab => {
+            tab.addEventListener("click", () => {
+                settingsTabs.forEach(t => t.classList.remove("tab-active"));
+                settingsTabContents.forEach(c => c.classList.remove("tab-visible"));
+                tab.classList.add("tab-active");
+                document.querySelector(`.settings-tab-content[data-tab-content="${tab.dataset.tab}"]`).classList.add("tab-visible");
+            });
+        });
+
+        function populateSettingsUI() {
+            setLightweightUI(lightweightMode);
+            setToggleElem(toggleControlModeElem, controlMode === "mouse");
+            setToggleElem(toggleTouchUIElem, useTouchUI);
+            setToggleElem(toggleFullscreenElem, !!document.fullscreenElement);
+            setToggleElem(toggleStarsElem, showStars);
+            setToggleElem(toggleMinimapElem, showMinimap);
+            setToggleElem(toggleParticlesElem, showParticles);
+            setToggleElem(toggleGlowElem, showGlow);
+            setToggleElem(toggleMinimapAsteroidsElem, showMinimapAsteroids);
+            setToggleElem(toggleDamageElem, showDamage);
+            setToggleElem(toggleShakeElem, enableShake);
+            setToggleElem(
+                toggleAllElem,
+                showStars &&
+                showMinimap &&
+                showParticles &&
+                showGlow &&
+                showMinimapAsteroids &&
+                showDamage &&
+                enableShake
+            );
+            const shakeSlider = document.getElementById("shakeIntensitySlider");
+            if (shakeSlider) {
+                shakeSlider.value = Math.round((featureSettings.shakeIntensity !== undefined ? featureSettings.shakeIntensity : 1.0) * 100);
+            }
+        }
+
+        btnOpenSettingsView?.addEventListener("click", () => {
+            pauseMainView.style.display = "none";
+            pauseSettingsView.style.display = "block";
+            document.getElementById("settingsMenuTitle").innerText = "SETTINGS";
+            populateSettingsUI();
+        });
+
+        btnBackToPauseMain?.addEventListener("click", () => {
+            saveFeatureSettings(featureSettings); // Save display settings
+            saveAudioSettings(audioSettings.sfx, audioSettings.bgm, audioSettings.boostSound); // Save audio settings
+
+            if (isSettingsFromHome) {
+                document.getElementById("pauseSettingsMenu").style.display = "none";
+                document.getElementById("modeSelectModal").style.display = "block";
+                isSettingsFromHome = false;
+            } else {
+                pauseSettingsView.style.display = "none";
+                pauseMainView.style.display = "block";
+                document.getElementById("settingsMenuTitle").innerText = "PAUSE MENU";
+            }
+        });
+
+        bgmVolumeSlider.value = audioSettings.bgm;
+        sfxVolumeSlider.value = audioSettings.sfx;
+        damageTextSizeSlider.value =
+            featureSettings.damageTextSize !== undefined
+                ? featureSettings.damageTextSize
+                : 24;
+
+        document
+            .getElementById("btnHomeSettings")
+            ?.addEventListener("click", () => {
+                document.getElementById("modeSelectModal").style.display = "none";
+                document.getElementById("pauseSettingsMenu").style.display = "block";
+
+                pauseMainView.style.display = "none";
+                pauseSettingsView.style.display = "block";
+
+                document.getElementById("settingsMenuTitle").innerText = "SETTINGS";
+                document.getElementById("pauseSubText").style.display = "none";
+                isSettingsFromHome = true;
+                populateSettingsUI();
+            });
+
+        openKeymapFromMenuBtn?.addEventListener("click", () => {
+            renderKeymapList();
+            keymapModal.style.display = "block";
+            pauseSettingsMenu.style.display = "none";
+            bindingAction = null;
+            updateBindingNotice();
+        });
+        /* openBasicSettingsBtn and openAudioSettingsBtn are removed since we are using tabs */
+
+        closePauseSettingsBtn?.addEventListener("click", () => {
+            setPauseState(false);
+        });
+
+        closeKeymapBtn?.addEventListener("click", () => {
+            keymapModal.style.display = "none";
+            pauseSettingsMenu.style.display = "block";
+            bindingAction = null;
+            updateBindingNotice();
+        });
+        resetDefaultsBtn?.addEventListener("click", () => {
+            keyBindings = JSON.parse(JSON.stringify(defaultKeyBindings));
+            saveKeyBindings(keyBindings);
+            renderKeymapList();
+            updateBindingNotice();
+        });
+
+        document
+            .getElementById("btnLeaveMultiplayer")
+            ?.addEventListener("click", () => {
+                window.leaveMultiplayerRoom(false);
+            });
+        document
+            .getElementById("btnLeaveSingleplayer")
+            ?.addEventListener("click", async () => {
+                if (
+                    gameOverMode &&
+                    !document
+                        .getElementById("rankingModal")
+                        .style.display.includes("block")
+                ) {
+                    await handleGameOverSubmit();
+                }
+
+                running = false;
+                gameOverMode = false;
+                isPaused = false;
+                matchEnded = false;
+                window._testPlayMode = false;
+                document
+                    .querySelectorAll(".game-modal")
+                    .forEach((m) => (m.style.display = "none"));
+                document.getElementById("pauseSettingsMenu").style.display = "none";
+                document.getElementById("modeSelectModal").style.display = "block";
+
+                resetGameBackground();
+
+                ctx.fillStyle = "#050510";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            });
+
+        function renderKeymapList() {
+            kmListDiv.innerHTML = "";
+            const order = [
+                ["thrust", "前進"],
+                ["turnLeft", "左旋回"],
+                ["turnRight", "右旋回"],
+                ["brake", "ブレーキ"],
+                ["shoot", "射撃"],
+                ["boost", "ブースト"],
+                ["rollLeft", "横スライド左"],
+                ["rollRight", "横スライド右"],
+                ["pause", "ポーズ"],
+                ["restart", "リスタート/戻る"],
+                ["help", "ヘルプ表示"],
+            ];
+            for (const [key, label] of order) {
+                const row = document.createElement("div");
+                row.className = "km-row";
+                const lab = document.createElement("div");
+                lab.textContent = label;
+                const keydiv = document.createElement("div");
+                keydiv.className = "km-key";
+                keydiv.textContent = displayBind(keyBindings[key]);
+                const actions = document.createElement("div");
+                actions.className = "km-actions";
+                const changeBtn = document.createElement("button");
+                changeBtn.textContent = "変更";
+                changeBtn.className = "cyber-btn";
+                const clearBtn = document.createElement("button");
+                clearBtn.textContent = "消去";
+                clearBtn.className = "cyber-btn btn-red";
+                changeBtn.addEventListener("click", () => {
+                    bindingAction = key;
+                    updateBindingNotice();
+                });
+                clearBtn.addEventListener("click", () => {
+                    keyBindings[key] = [];
+                    saveKeyBindings(keyBindings);
+                    renderKeymapList();
+                    updateBindingNotice();
+                });
+                actions.appendChild(changeBtn);
+                actions.appendChild(clearBtn);
+                row.appendChild(lab);
+                row.appendChild(keydiv);
+                row.appendChild(actions);
+                kmListDiv.appendChild(row);
+            }
+        }
+        function updateBindingNotice() {
+            if (bindingAction) {
+                bindingNoticeDiv.textContent = `新しいキーを押してください。Escでキャンセル`;
+            } else {
+                bindingNoticeDiv.textContent =
+                    "「変更」を押し、割り当てるキーを押してください。";
+            }
+        }
+
+        function setToggleElem(el, on) {
+            if (!el) return;
+            // Add bounce animation
+            el.classList.remove("bounce");
+            void el.offsetWidth; // trigger reflow
+            el.classList.add("bounce");
+
+            if (on) {
+                el.classList.add("on");
+                el.setAttribute("aria-checked", "true");
+            } else {
+                el.classList.remove("on");
+                el.setAttribute("aria-checked", "false");
+            }
+        }
+
+        // ゴースト/リップルエフェクト追加
+        document.addEventListener('click', function (e) {
+            let btn = e.target.closest('.cyber-btn');
+            if (btn && !btn.disabled) {
+                let ripple = document.createElement('div');
+                ripple.className = 'btn-ripple';
+                let rect = btn.getBoundingClientRect();
+                let size = Math.max(rect.width, rect.height);
+                ripple.style.width = ripple.style.height = size + 'px';
+                ripple.style.left = (e.clientX - rect.left - size / 2) + 'px';
+                ripple.style.top = (e.clientY - rect.top - size / 2) + 'px';
+                btn.appendChild(ripple);
+                setTimeout(() => ripple.remove(), 450);
+            }
+        });
+        function setLightweightUI(on) {
+            setToggleElem(lightweightToggle, on);
+        }
+        function wireToggle(elem, getStateFn, setStateFn) {
+            if (!elem) return;
+            elem.addEventListener("click", () => {
+                const newv = !getStateFn();
+                setStateFn(newv);
+                if (elem !== toggleAllElem) {
+                    setToggleElem(
+                        toggleAllElem,
+                        featureSettings.stars &&
+                        featureSettings.minimap &&
+                        featureSettings.particles &&
+                        featureSettings.glow &&
+                        featureSettings.minimapAsteroids &&
+                        featureSettings.showDamage !== false &&
+                        featureSettings.enableShake !== false,
+                    );
+                    saveFeatureSettings(featureSettings);
+                }
+            });
+            elem.addEventListener("keydown", (e) => {
+                if (e.key === " " || e.key === "Enter") {
+                    e.preventDefault();
+                    elem.click();
+                }
+            });
+        }
+        wireToggle(
+            toggleStarsElem,
+            () => featureSettings.stars,
+            (v) => {
+                featureSettings.stars = v;
+                applyFeatureSettingsToRuntime();
+                setToggleElem(toggleStarsElem, v);
+                starCacheNeedsRegen = true;
+                saveFeatureSettings(featureSettings);
+            },
+        );
+        wireToggle(
+            toggleMinimapElem,
+            () => featureSettings.minimap,
+            (v) => {
+                featureSettings.minimap = v;
+                applyFeatureSettingsToRuntime();
+                setToggleElem(toggleMinimapElem, v);
+                saveFeatureSettings(featureSettings);
+            },
+        );
+        wireToggle(
+            toggleParticlesElem,
+            () => featureSettings.particles,
+            (v) => {
+                featureSettings.particles = v;
+                applyFeatureSettingsToRuntime();
+                setToggleElem(toggleParticlesElem, v);
+                saveFeatureSettings(featureSettings);
+            },
+        );
+        wireToggle(
+            toggleGlowElem,
+            () => featureSettings.glow,
+            (v) => {
+                featureSettings.glow = v;
+                applyFeatureSettingsToRuntime();
+                setToggleElem(toggleGlowElem, v);
+                saveFeatureSettings(featureSettings);
+            },
+        );
+        wireToggle(
+            toggleMinimapAsteroidsElem,
+            () => featureSettings.minimapAsteroids,
+            (v) => {
+                featureSettings.minimapAsteroids = v;
+                applyFeatureSettingsToRuntime();
+                setToggleElem(toggleMinimapAsteroidsElem, v);
+                saveFeatureSettings(featureSettings);
+            },
+        );
+        wireToggle(
+            toggleDamageElem,
+            () => featureSettings.showDamage !== false,
+            (v) => {
+                featureSettings.showDamage = v;
+                applyFeatureSettingsToRuntime();
+                setToggleElem(toggleDamageElem, v);
+                saveFeatureSettings(featureSettings);
+            },
+        );
+        wireToggle(
+            toggleShakeElem,
+            () => featureSettings.enableShake !== false,
+            (v) => {
+                featureSettings.enableShake = v;
+                applyFeatureSettingsToRuntime();
+                setToggleElem(toggleShakeElem, v);
+                saveFeatureSettings(featureSettings);
+            },
+        );
+
+        toggleControlModeElem?.addEventListener("click", () => {
+            if (useTouchUI) return; // Cannot change while touch UI is active
+            controlMode = controlMode === "mouse" ? "keyboard" : "mouse";
+            localStorage.setItem("controlMode_v1", controlMode);
+            setToggleElem(toggleControlModeElem, controlMode === "mouse");
+        });
+        toggleControlModeElem?.addEventListener("keydown", (e) => {
+            if (e.key === " " || e.key === "Enter") {
+                e.preventDefault();
+                toggleControlModeElem.click();
+            }
+        });
+
+        toggleTouchUIElem?.addEventListener("click", () => {
+            useTouchUI = !useTouchUI;
+            localStorage.setItem("forceTouchUI_v1", useTouchUI ? "1" : "0");
+            setToggleElem(toggleTouchUIElem, useTouchUI);
+            updateTouchUIVisibility();
+        });
+        toggleTouchUIElem?.addEventListener("keydown", (e) => {
+            if (e.key === " " || e.key === "Enter") {
+                e.preventDefault();
+                toggleTouchUIElem.click();
+            }
+        });
+
+        toggleFullscreenElem?.addEventListener("click", () => {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(() => { });
+                setToggleElem(toggleFullscreenElem, true);
+            } else {
+                if (document.exitFullscreen) document.exitFullscreen();
+                setToggleElem(toggleFullscreenElem, false);
+            }
+        });
+        toggleFullscreenElem?.addEventListener("keydown", (e) => {
+            if (e.key === " " || e.key === "Enter") {
+                e.preventDefault();
+                toggleFullscreenElem.click();
+            }
+        });
+
+        wireToggle(
+            toggleAllElem,
+            () =>
+                featureSettings.stars &&
+                featureSettings.minimap &&
+                featureSettings.particles &&
+                featureSettings.glow &&
+                featureSettings.minimapAsteroids &&
+                featureSettings.showDamage !== false &&
+                featureSettings.enableShake !== false,
+            (v) => {
+                featureSettings.stars = v;
+                featureSettings.minimap = v;
+                featureSettings.particles = v;
+                featureSettings.glow = v;
+                featureSettings.minimapAsteroids = v;
+                featureSettings.showDamage = v;
+                featureSettings.enableShake = v;
+                applyFeatureSettingsToRuntime();
+                setToggleElem(toggleStarsElem, v);
+                setToggleElem(toggleMinimapElem, v);
+                setToggleElem(toggleParticlesElem, v);
+                setToggleElem(toggleGlowElem, v);
+                setToggleElem(toggleMinimapAsteroidsElem, v);
+                setToggleElem(toggleDamageElem, v);
+                setToggleElem(toggleShakeElem, v);
+                setToggleElem(toggleAllElem, v);
+                saveFeatureSettings(featureSettings);
+                starCacheNeedsRegen = true;
+            },
+        );
+
+        wireToggle(
+            toggleBoostSoundElem,
+            () => audioSettings.boostSound,
+            (v) => {
+                audioSettings.boostSound = v;
+                setToggleElem(toggleBoostSoundElem, v);
+                saveAudioSettings(
+                    audioSettings.sfx,
+                    audioSettings.bgm,
+                    audioSettings.boostSound,
+                );
+            },
+        );
+        setToggleElem(toggleBoostSoundElem, audioSettings.boostSound);
+
+        lightweightToggle?.addEventListener("click", () => {
+            applyLightweightMode(!lightweightMode);
+            setLightweightUI(lightweightMode);
+            applyFeatureSettingsToRuntime();
+        });
+        lightweightToggle?.addEventListener("keydown", (e) => {
+            if (e.key === " " || e.key === "Enter") {
+                e.preventDefault();
+                applyLightweightMode(!lightweightMode);
+                setLightweightUI(lightweightMode);
+                applyFeatureSettingsToRuntime();
+            }
+        });
+
+        damageTextSizeSlider?.addEventListener("input", (e) => {
+            featureSettings.damageTextSize = parseInt(e.target.value);
+            applyFeatureSettingsToRuntime();
+            saveFeatureSettings(featureSettings);
+        });
+        const shakeIntensitySlider = document.getElementById(
+            "shakeIntensitySlider",
+        );
+        shakeIntensitySlider?.addEventListener("input", (e) => {
+            featureSettings.shakeIntensity = parseInt(e.target.value) / 100;
+            applyFeatureSettingsToRuntime();
+            saveFeatureSettings(featureSettings);
+        });
+
+        /* ========== タブ離脱時の音楽停止 ========== */
+        document.addEventListener("visibilitychange", () => {
+            if (document.hidden) {
+                // タブ非アクティブ → BGM一時停止
+                if (bgmAudio && !bgmAudio.paused) bgmAudio.pause();
+                if (audioCtx && audioCtx.state === "running") audioCtx.suspend();
+            } else {
+                // タブ復帰 → BGM再開
+                if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+                if (bgmAudio && bgmAudio.paused) bgmAudio.play().catch(() => { });
+            }
+        });
+
+        /* ニックネーム、モード選択のロジック */
+        const nicknameModal = document.getElementById("nicknameModal");
+        const nicknameInput = document.getElementById("nicknameInput");
+        const saveNicknameBtn = document.getElementById("saveNicknameBtn");
+        const rankingModal = document.getElementById("rankingModal");
+        const closeRankingBtn = document.getElementById("closeRankingBtn");
+        const nicknameModalTitle = document.getElementById("nicknameModalTitle");
+        const nicknameModalDesc = document.getElementById("nicknameModalDesc");
+
+        function checkAndSetNickname() {
+            const nickname = localStorage.getItem("playerNickname_v1");
+            if (!nickname) {
+                running = false;
+                nicknameModal.style.display = "block";
+                nicknameInput.focus();
+            } else {
+                running = false;
+                document.getElementById("modeSelectModal").style.display = "block";
+            }
+        }
+        saveNicknameBtn?.addEventListener("click", () => {
+            const name = nicknameInput.value.trim();
+            if (name && name.length > 0) {
+                localStorage.setItem("playerNickname_v1", name);
+                nicknameModal.style.display = "none";
+                if (!gameOverMode) {
+                    document.getElementById("modeSelectModal").style.display = "block";
+                }
+            } else {
+                alert("コールサインを入力してください");
+            }
+        });
+        nicknameInput?.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                saveNicknameBtn.click();
+            }
+        });
+        closeRankingBtn?.addEventListener("click", () => {
+            rankingModal.style.display = "none";
+            if (gameOverMode) {
+                document.getElementById("modeSelectModal").style.display = "block";
+                resetGameBackground();
+                ctx.fillStyle = "#050510";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            } else {
+                document.getElementById("modeSelectModal").style.display = "block";
+            }
+        });
+        changeNicknameBtn?.addEventListener("click", () => {
+            document.getElementById("pauseSettingsView").style.display = "none";
+            document.getElementById("pauseSettingsMenu").style.display = "none";
+            nicknameModal.style.display = "block";
+            nicknameModalTitle.textContent = "PILOT RE-REGISTRATION";
+            nicknameModalDesc.textContent = "新しいコールサインを入力してください";
+            nicknameInput.value = localStorage.getItem("playerNickname_v1") || "";
+            nicknameInput.focus();
+        });
+        function applyBgmVolume() {
+            const vol = parseFloat(bgmVolumeSlider.value);
+            audioSettings.bgm = vol;
+            if (bgmGainNode) bgmGainNode.gain.value = vol;
+            if (bgmAudio) bgmAudio.volume = vol;
+            saveAudioSettings(
+                audioSettings.sfx,
+                audioSettings.bgm,
+                audioSettings.boostSound,
+            );
+        }
+        function applySfxVolume() {
+            const vol = parseFloat(sfxVolumeSlider.value);
+            audioSettings.sfx = vol;
+            if (sfxGain) sfxGain.gain.value = vol;
+            saveAudioSettings(
+                audioSettings.sfx,
+                audioSettings.bgm,
+                audioSettings.boostSound,
+            );
+        }
+        bgmVolumeSlider?.addEventListener("input", applyBgmVolume);
+        bgmVolumeSlider?.addEventListener("change", applyBgmVolume);
+        bgmVolumeSlider?.addEventListener("touchmove", applyBgmVolume);
+        sfxVolumeSlider?.addEventListener("input", applySfxVolume);
+        sfxVolumeSlider?.addEventListener("change", applySfxVolume);
+        sfxVolumeSlider?.addEventListener("touchmove", applySfxVolume);
+
+        // モード選択ボタンの制御
+        document
+            .getElementById("btnSinglePlayer")
+            ?.addEventListener("click", () => {
+                document.getElementById("modeSelectModal").style.display = "none";
+                document.getElementById("difficultyModal").style.display = "block";
+            });
+        document
+            .getElementById("btnMultiPlayer")
+            ?.addEventListener("click", () => {
+                document.getElementById("modeSelectModal").style.display = "none";
+                document.getElementById("lobbyModal").style.display = "block";
+                if (window.subscribeRooms) window.subscribeRooms();
+            });
+        document
+            .getElementById("btnShowRanking")
+            ?.addEventListener("click", () => {
+                document.getElementById("modeSelectModal").style.display = "none";
+                document.getElementById("rankingModal").style.display = "block";
+                window._rankingDifficulty = "normal";
+                updateRankingTabs();
+                if (window.fetchTopRanks)
+                    window.fetchTopRanks("normal").then(displayRanking);
+            });
+        document
+            .getElementById("btnBackToMode")
+            ?.addEventListener("click", () => {
+                document.getElementById("lobbyModal").style.display = "none";
+                document.getElementById("modeSelectModal").style.display = "block";
+                if (window.unsubscribeRooms) window.unsubscribeRooms();
+            });
+        document
+            .getElementById("btnResultToHome")
+            ?.addEventListener("click", () => {
+                document.getElementById("resultModal").style.display = "none";
+                window.leaveMultiplayerRoom();
+            });
+
+        // ルーム待機室ボタン
+        document.getElementById("btnLeaveRoom")?.addEventListener("click", () => {
+            window.leaveMultiplayerRoom();
+        });
+
+        document.getElementById("btnStartGame")?.addEventListener("click", () => {
+            if (photonClient && photonClient.isJoinedToRoom()) {
+                photonClient.raiseEvent(4, window.currentRoomSettings, {
+                    receivers: Photon.LoadBalancing.Constants.ReceiverGroup.All,
+                });
+                if (window.currentRoomDocId && window.updateFirestoreRoomStatus)
+                    window.updateFirestoreRoomStatus(window.currentRoomDocId);
+            }
+        });
+
+        /* 初期化処理 */
+
+        // 難易度ボタンイベント
+        function startWithDifficulty(diff) {
+            window.currentDifficulty = diff;
+            document.getElementById("difficultyModal").style.display = "none";
+            startSinglePlayerCountdown();
+        }
+        document
+            .getElementById("btnEasy")
+            ?.addEventListener("click", () => startWithDifficulty("easy"));
+        document
+            .getElementById("btnNormal")
+            ?.addEventListener("click", () => startWithDifficulty("normal"));
+        document
+            .getElementById("btnHard")
+            ?.addEventListener("click", () => startWithDifficulty("hard"));
+        document
+            .getElementById("btnBackFromDifficulty")
+            ?.addEventListener("click", () => {
+                document.getElementById("difficultyModal").style.display = "none";
+                document.getElementById("modeSelectModal").style.display = "block";
+            });
+
+        // ランキングタブ切替
+        const RANK_TAB_COLORS = {
+            easy: "#00ff66",
+            normal: "#00f0ff",
+            hard: "#ff0055",
+        };
+        function updateRankingTabs() {
+            document.querySelectorAll(".rank-tab").forEach((tab) => {
+                const isActive = tab.dataset.diff === window._rankingDifficulty;
+                tab.classList.toggle("rank-tab-active", isActive);
+                tab.style.borderBottom = isActive
+                    ? `2px solid ${RANK_TAB_COLORS[tab.dataset.diff]}`
+                    : "none";
+            });
+        }
+        document.querySelectorAll(".rank-tab").forEach((tab) => {
+            tab.addEventListener("click", () => {
+                window._rankingDifficulty = tab.dataset.diff;
+                updateRankingTabs();
+                document.getElementById("rankingList").innerHTML =
+                    "ランキング取得中...";
+                if (window.fetchTopRanks)
+                    window.fetchTopRanks(tab.dataset.diff).then(displayRanking);
+            });
+        });
+
+        /* ========== デベロッパーモード ========== */
+        let devMode = localStorage.getItem("devMode_v1") === "1";
+        const toggleDevModeElem = document.getElementById("toggleDevMode");
+        const btnTestPlay = document.getElementById("btnTestPlay");
+
+        function updateDevModeUI() {
+            setToggleElem(toggleDevModeElem, devMode);
+            if (btnTestPlay)
+                btnTestPlay.style.display = devMode ? "inline-block" : "none";
+        }
+        updateDevModeUI();
+
+        toggleDevModeElem?.addEventListener("click", () => {
+            devMode = !devMode;
+            localStorage.setItem("devMode_v1", devMode ? "1" : "0");
+            updateDevModeUI();
+        });
+        toggleDevModeElem?.addEventListener("keydown", (e) => {
+            if (e.key === " " || e.key === "Enter") {
+                e.preventDefault();
+                toggleDevModeElem.click();
+            }
+        });
+
+        // 基本設定ボタン → 画面設定モーダルを開く
+        document
+            .getElementById("openDevSettings")
+            ?.addEventListener("click", () => {
+                basicSettingsModal.style.display = "block";
+                pauseSettingsMenu.style.display = "none";
+                updateDevModeUI();
+            });
+
+        // テストプレイ
+        let tpSpectate = false;
+        let tpWaveSpawn = true;
+        let tpFriendlyFire = false;
+        let tpPowerups = true;
+        const toggleSpectateElem = document.getElementById("toggleSpectate");
+        const toggleWaveSpawnElem = document.getElementById("toggleWaveSpawn");
+        const toggleFriendlyFireElem =
+            document.getElementById("toggleFriendlyFire");
+        const togglePowerupsElem = document.getElementById("togglePowerups");
+
+        function wireTestToggle(elem, getter, setter) {
+            if (!elem) return;
+            elem.addEventListener("click", () => {
+                const v = !getter();
+                setter(v);
+                setToggleElem(elem, v);
+            });
+            elem.addEventListener("keydown", (e) => {
+                if (e.key === " " || e.key === "Enter") {
+                    e.preventDefault();
+                    elem.click();
+                }
+            });
+        }
+        wireTestToggle(
+            toggleSpectateElem,
+            () => tpSpectate,
+            (v) => (tpSpectate = v),
+        );
+        wireTestToggle(
+            toggleWaveSpawnElem,
+            () => tpWaveSpawn,
+            (v) => (tpWaveSpawn = v),
+        );
+        wireTestToggle(
+            toggleFriendlyFireElem,
+            () => tpFriendlyFire,
+            (v) => (tpFriendlyFire = v),
+        );
+        wireTestToggle(
+            togglePowerupsElem,
+            () => tpPowerups,
+            (v) => (tpPowerups = v),
+        );
+
+        // チーム数切替
+        document
+            .getElementById("tpTeamCount")
+            ?.addEventListener("change", (e) => {
+                const count = parseInt(e.target.value);
+                document.querySelectorAll(".tp-team-block").forEach((block) => {
+                    const teamNum = parseInt(block.dataset.team);
+                    block.style.display = teamNum <= count ? "" : "none";
+                });
+            });
+
+        btnTestPlay?.addEventListener("click", () => {
+            document.getElementById("modeSelectModal").style.display = "none";
+            document.getElementById("testPlayModal").style.display = "block";
+        });
+        document
+            .getElementById("btnBackFromTestPlay")
+            ?.addEventListener("click", () => {
+                document.getElementById("testPlayModal").style.display = "none";
+                document.getElementById("modeSelectModal").style.display = "block";
+            });
+
+        document
+            .getElementById("btnStartTestPlay")
+            ?.addEventListener("click", () => {
+                document.getElementById("testPlayModal").style.display = "none";
+
+                const teamCount =
+                    parseInt(document.getElementById("tpTeamCount").value) || 2;
+                const teams = [];
+                document.querySelectorAll(".tp-team-block").forEach((block) => {
+                    const teamNum = parseInt(block.dataset.team);
+                    if (teamNum <= teamCount) {
+                        teams.push({
+                            team: teamNum,
+                            aiCount: parseInt(block.querySelector(".tpTeamAi").value) || 0,
+                            difficulty:
+                                block.querySelector(".tpTeamDiff").value || "normal",
+                        });
+                    }
+                });
+
+                const tpSettings = {
+                    teams,
+                    teamCount,
+                    playerTeam:
+                        parseInt(document.getElementById("tpPlayerTeam").value) || 1,
+                    spectate: tpSpectate,
+                    waveSpawn: tpWaveSpawn,
+                    friendlyFire: tpFriendlyFire,
+                    powerups: tpPowerups,
+                    playerHp:
+                        parseInt(document.getElementById("tpPlayerHp").value) || 250,
+                    playerBulletSpeed:
+                        parseInt(document.getElementById("tpPlayerBulletSpeed").value) ||
+                        47,
+                    playerLives:
+                        parseInt(document.getElementById("tpPlayerLives").value) || 3,
+                    aiHp: parseInt(document.getElementById("tpAiHp").value) || 45,
+                    aiShootCd:
+                        parseInt(document.getElementById("tpAiShootCd").value) || 140,
+                    aiTurnSpeed:
+                        parseFloat(document.getElementById("tpAiTurnSpeed").value) || 0.1,
+                    aiThrust:
+                        parseFloat(document.getElementById("tpAiThrust").value) || 0.1,
+                    aiMaxSpeed:
+                        parseFloat(document.getElementById("tpAiMaxSpeed").value) || 5.5,
+                    asteroidCount:
+                        parseInt(document.getElementById("tpAsteroidCount").value) || 20,
+                    worldW: parseInt(document.getElementById("tpWorldW").value) || 4000,
+                    worldH: parseInt(document.getElementById("tpWorldH").value) || 4000,
+                };
+
+                startTestPlay(tpSettings);
+            });
+
+        function startTestPlay(settings) {
+            window.isMultiplayer = false;
+            window.currentDifficulty = "normal";
+            window._testPlaySettings = settings;
+            window._testPlayMode = true;
+
+            // ワールドサイズ変更
+            WORLD_W = settings.worldW;
+            WORLD_H = settings.worldH;
+
+            // ゲーム初期化
+            bullets = [];
+            particles = [];
+            asteroids = [];
+            ships = [];
+            floatingTexts = [];
+            powerups = [];
+            cameraShake = 0;
+            powerupsEnabled = settings.powerups !== false;
+            idGen = 2;
+            wave = 1;
+            score = 0;
+            message = "TEST PLAY";
+            showHelp = false;
+            gameOverMode = false;
+            matchEnded = false;
+            isPaused = false;
+            document.getElementById("pauseSettingsMenu").style.display = "none";
+            if (controlMode === "initial") {
+                resumeAudioOnFirstGesture();
+            }
+
+            // プレイヤー生成
+            const pTeam = settings.playerTeam;
+            const player = {
+                id: playerId,
+                faction: "player",
+                team: pTeam,
+                x: WORLD_W / 2,
+                y: WORLD_H / 2,
+                vx: 0,
+                vy: 0,
+                angle: -Math.PI / 2,
+                turnSpeed: 0.07,
+                thrust: 0.12,
+                maxSpeed: 6,
+                drag: 0.005,
+                heat: 0,
+                maxHeat: 100,
+                boosting: false,
+                boostTimer: 0,
+                shootCd: 100,
+                shootTimer: 0,
+                alive: true,
+                isGhost: settings.spectate,
+                hp: settings.playerHp,
+                maxHp: settings.playerHp,
+                scoreValue: 0,
+                rollPhase: 0,
+                ai: null,
+                weaponType: 0,
+                weaponTimer: 0,
+            };
+            ships.push(player);
+            lives = settings.spectate ? 0 : settings.playerLives;
+
+            // 隕石生成
+            spawnAsteroids(settings.asteroidCount);
+
+            // チーム別AI生成
+            for (const teamConfig of settings.teams) {
+                window.currentDifficulty = teamConfig.difficulty;
+                for (let i = 0; i < teamConfig.aiCount; i++) {
+                    const isAlly = teamConfig.team === pTeam;
+                    const s = makeAIShip(isAlly ? "ally" : "enemy");
+                    s.team = teamConfig.team;
+                    s.hp = settings.aiHp;
+                    s.maxHp = settings.aiHp;
+                    s.shootCd = settings.aiShootCd;
+                    s.turnSpeed = settings.aiTurnSpeed + (isAlly ? 0 : 0.02);
+                    s.thrust = settings.aiThrust;
+                    s.maxSpeed = settings.aiMaxSpeed;
+                    s.ai.difficulty = teamConfig.difficulty;
+                    ships.push(s);
+                }
+            }
+            window.currentDifficulty = "normal";
+
+            document.getElementById("hudHintText").innerText = settings.spectate
+                ? "(TEST: 観戦モード - P=ポーズ, R=戻る)"
+                : "(TEST: P=ポーズ/メニュー, R=戻る)";
+
+            running = true;
+            updateTouchUIVisibility();
+        }
+
+        resize();
+        applyLightweightMode(lightweightMode);
+        applyFeatureSettingsToRuntime();
+        const vtEl = document.getElementById("versionText");
+        if (vtEl) vtEl.textContent = GAME_VERSION;
+
+        // iOS Safari fix: force layout recalculation to fix fixed-position tap offset
+        // This mimics the zoom-in/zoom-out action that users noticed fixes the issue
+        if (isMobileDevice) {
+            // Force a full layout pass by reading offsetHeight then scrolling
+            document.body.offsetHeight;
+            window.scrollTo(0, 0);
+            // After a short delay, trigger resize again to ensure canvas and fixed elements are correct
+            setTimeout(() => {
+                window.scrollTo(0, 0);
+                resize();
+                // Force any modals to recalculate position
+                document.querySelectorAll(".game-modal").forEach((m) => {
+                    if (m.style.display !== "none") {
+                        m.style.display = "none";
+                        void m.offsetHeight;
+                        m.style.display = "block";
+                    }
+                });
+            }, 100);
+            setTimeout(() => {
+                window.scrollTo(0, 0);
+                resize();
+            }, 300);
+        }
+
+        checkAndSetNickname();
+        requestAnimationFrame(frame);
+    </script>

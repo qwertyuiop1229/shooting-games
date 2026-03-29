@@ -1,0 +1,1 @@
+const fs = require('fs'); const index = fs.readFileSync('public/index.html', 'utf8').split('\n'); const inline = index.slice(1910, 7166).join('\n'); fs.writeFileSync('tmp_inline.js', inline); const game = fs.readFileSync('public/game.js', 'utf8'); if(game === inline) console.log('EXACT MATCH'); else console.log('DIFFERENT');

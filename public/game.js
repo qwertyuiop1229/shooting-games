@@ -641,7 +641,7 @@
         let mouse = { x: 0, y: 0, down: false };
         let bindingAction = null;
 
-        const GAME_VERSION = "1.0.10";
+        const GAME_VERSION = "1.0.12";
         let running = false,
             showHelp = false;
         let isPaused = false;
@@ -732,35 +732,7 @@
                 }
             }
 
-            if (matchKeyToBind(k, keyBindings.restart) || k === "r") {
-                e.preventDefault();
-                if (window.isMultiplayer) return;
 
-                // ゲームオーバー状態ならランキングへ
-                if (
-                    gameOverMode &&
-                    !document
-                        .getElementById("rankingModal")
-                        .style.display.includes("block")
-                ) {
-                    handleGameOverSubmit();
-                    return;
-                }
-
-                running = false;
-                gameOverMode = false;
-                isPaused = false;
-                matchEnded = false;
-                document
-                    .querySelectorAll(".game-modal")
-                    .forEach((m) => (m.style.display = "none"));
-                document.getElementById("pauseSettingsMenu").style.display = "none";
-                document.getElementById("modeSelectModal").style.display = "block";
-                resetGameBackground();
-                ctx.fillStyle = "#050510";
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-                return;
-            }
             if (matchKeyToBind(k, keyBindings.help)) {
                 showHelp = !showHelp;
                 e.preventDefault();
@@ -2377,8 +2349,9 @@
         function enterGameOverMode() {
             if (gameOverMode || window.isMultiplayer) return;
             gameOverMode = true;
-            message = `GAME OVER - [R]キーかメニューから終了してランキングを確認`;
+            message = `GAME OVER - [Esc]キーかメニューから終了`;
             updateTouchUIVisibility();
+            handleGameOverSubmit().catch(console.error);
         }
 
         async function handleGameOverSubmit() {
@@ -2395,6 +2368,8 @@
             if (currentScore > maxPossibleScore) {
                 console.warn("異常なスコアを検出しました");
                 message = "SCORE ERROR - 無効なプレイデータです";
+                document.getElementById("cheatWarningModal").style.display = "block";
+                if (running) setPauseState(true);
                 return;
             }
 
@@ -4943,14 +4918,22 @@
         });
         closeRankingBtn?.addEventListener("click", () => {
             rankingModal.style.display = "none";
-            if (gameOverMode) {
+            if (!gameOverMode) {
                 document.getElementById("modeSelectModal").style.display = "block";
-                resetGameBackground();
-                ctx.fillStyle = "#050510";
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
             } else {
-                document.getElementById("modeSelectModal").style.display = "block";
+                if (running && isPaused) setPauseState(false);
             }
+        });
+        document.getElementById("closeCheatWarningBtn")?.addEventListener("click", () => {
+            document.getElementById("cheatWarningModal").style.display = "none";
+            document.getElementById("modeSelectModal").style.display = "block";
+            running = false;
+            gameOverMode = false;
+            isPaused = false;
+            matchEnded = false;
+            resetGameBackground();
+            ctx.fillStyle = "#050510";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
         });
         changeNicknameBtn?.addEventListener("click", () => {
             document.getElementById("pauseSettingsView").style.display = "none";

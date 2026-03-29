@@ -10,6 +10,7 @@ service cloud.firestore {
                             && request.resource.data.score >= 0
                             && request.resource.data.playTimeSeconds is number
                             && request.resource.data.playTimeSeconds >= 0
+                            && request.resource.data.playTimeSeconds <= 10800
                             && request.resource.data.score <= request.resource.data.playTimeSeconds * 300
                             && request.resource.data.name is string
                             && request.resource.data.name.size() <= 12;
@@ -21,6 +22,7 @@ service cloud.firestore {
                             && request.resource.data.score >= 0
                             && request.resource.data.playTimeSeconds is number
                             && request.resource.data.playTimeSeconds >= 0
+                            && request.resource.data.playTimeSeconds <= 10800
                             && request.resource.data.score <= request.resource.data.playTimeSeconds * 300
                             && request.resource.data.name is string
                             && request.resource.data.name.size() <= 12;
@@ -32,6 +34,7 @@ service cloud.firestore {
                             && request.resource.data.score >= 0
                             && request.resource.data.playTimeSeconds is number
                             && request.resource.data.playTimeSeconds >= 0
+                            && request.resource.data.playTimeSeconds <= 10800
                             && request.resource.data.score <= request.resource.data.playTimeSeconds * 300
                             && request.resource.data.name is string
                             && request.resource.data.name.size() <= 12;

@@ -641,7 +641,7 @@
         let mouse = { x: 0, y: 0, down: false };
         let bindingAction = null;
 
-        const GAME_VERSION = "1.0.12";
+        const GAME_VERSION = "1.0.14";
         let running = false,
             showHelp = false;
         let isPaused = false;

@@ -1,6 +1,6 @@
 const fs = require('fs');
 const p = require('path');
-const filePath = p.join(__dirname, 'public', 'game.js');
+const filePath = p.join(__dirname, 'public', 'js', 'game.js');
 let js = fs.readFileSync(filePath, 'utf-8');
 
 const match = js.match(/const GAME_VERSION = (['"])(\d+)\.(\d+)\.(\d+)\1/);

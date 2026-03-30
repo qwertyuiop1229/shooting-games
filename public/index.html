@@ -11,7 +11,7 @@
     <link rel="manifest" href="manifest.json" />
     <title>Zero-G Space Shooter Online</title>
     <!-- Photon Javascript SDK -->
-    <script src="./photon.min.js"></script>
+    <script src="js/photon.min.js"></script>
     <style>
         body {
             user-select: none;
@@ -1255,8 +1255,12 @@
                             <div>画面の角丸マージン</div>
                             <div style="display:flex;align-items:center;gap:8px;">
                                 <input type="range" id="safeAreaSlider" min="0" max="60" step="1" value="0" />
-                                <span id="safeAreaValue" style="font-size:12px;color:#00f0ff;min-width:30px;text-align:right;">0px</span>
+                                <span id="safeAreaValue"
+                                    style="font-size:12px;color:#00f0ff;min-width:30px;text-align:right;">0px</span>
                             </div>
+                        </div>
+                        <div class="setting-row" style="margin-top: 5px;">
+                            <button id="btnOpenUILayoutEditor" class="cyber-btn btn-orange" style="width: 100%; font-size: 11px; padding: 6px;">画面のパーツ配置を設定</button>
                         </div>
                         <div class="setting-row">
                             <div>全画面表示</div>
@@ -1883,6 +1887,37 @@
             ホームに戻る
         </button>
     </div>
+
+    <!-- UI Layout Editor Overlay -->
+    <div id="layoutEditorOverlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 999999; background: rgba(0, 5, 20, 0.4); backdrop-filter: blur(2px); touch-action: none; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;">
+        <!-- ドラッグ用コンテナ -->
+        <div id="layoutEditorCanvas" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; overflow: hidden;"></div>
+        
+        <!-- プロパティ用パネル -->
+        <div style="position: absolute; bottom: 0; left: 0; width: 100%; background: rgba(5, 5, 15, 0.95); border-top: 2px solid #00f0ff; box-shadow: 0 -5px 15px rgba(0,240,255,0.2); padding: 15px; box-sizing: border-box; display: flex; flex-direction: column; gap: 12px; color: #fff;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span id="leSelectedName" style="color: #0f0; font-size: 14px; font-weight: bold; text-shadow: 0 0 5px #0f0;">★ 対象: 未選択</span>
+                <button id="leBtnClose" class="cyber-btn btn-red" style="padding: 6px 16px; font-size: 12px; border-radius: 4px;">保存＆終了</button>
+            </div>
+            
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <label style="font-size: 12px; color: #aaa; width: 50px;">サイズ:</label>
+                <input type="range" id="leScaleSlider" min="0.5" max="2.0" step="0.1" value="1.0" disabled style="flex-grow: 1;" />
+                <span id="leScaleVal" style="font-size: 12px; color: #00f0ff; min-width: 35px; text-align: right;">1.0x</span>
+            </div>
+            
+            <div style="display: flex; gap: 10px; margin-top: 4px;">
+                <button id="leBtnResetItem" class="cyber-btn" style="flex: 1; padding: 6px; font-size: 11px; border-radius: 4px;" disabled>リセット</button>
+                <button id="leBtnResetAll" class="cyber-btn btn-orange" style="flex: 1; padding: 6px; font-size: 11px; border-radius: 4px;">全て初期化</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- プレースホルダー文字等 -->
+    <div id="loading" class="terminal-text" style="display: none">
+        Loading...
+    </div>
+
     <div id="rankingModal" class="game-modal" style="display: none">
         <h3>TOP PILOTS</h3>
         <div id="rankingTabs" style="
@@ -1906,14 +1941,17 @@
         <button id="closeRankingBtn" class="cyber-btn">閉じる</button>
     </div>
 
-    <div id="cheatWarningModal" class="game-modal" style="display: none; border: 2px solid #ff0055; background: rgba(5,5,16,0.95); text-align: center;">
+    <div id="cheatWarningModal" class="game-modal"
+        style="display: none; border: 2px solid #ff0055; background: rgba(5,5,16,0.95); text-align: center;">
         <h3 style="color: #ff0055; text-shadow: 0 0 15px #ff0055; font-size: 32px; margin-bottom: 5px;">WARNING</h3>
-        <p style="margin-bottom: 25px; font-size: 16px; color: #fff; line-height: 1.6;">チート操作が検出されました。<br>スコアデータは無効化され記録されません。</p>
-        <button id="closeCheatWarningBtn" class="cyber-btn" style="border-color: #ff0055; color: #ff0055; box-shadow: 0 0 10px rgba(255,0,85,0.4);">閉じる</button>
+        <p style="margin-bottom: 25px; font-size: 16px; color: #fff; line-height: 1.6;">
+            チート操作が検出されました。<br>スコアデータは無効化され記録されません。</p>
+        <button id="closeCheatWarningBtn" class="cyber-btn"
+            style="border-color: #ff0055; color: #ff0055; box-shadow: 0 0 10px rgba(255,0,85,0.4);">閉じる</button>
     </div>
 
 
-    <script src="game.js"></script>
+    <script src="js/game.js"></script>
     <!-- ===== Firestore ===== -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
@@ -2137,6 +2175,61 @@
             }
         });
     </script>
+
+    <!-- UI Layout Editor Overlay -->
+    <div id="layoutEditorOverlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; z-index:999999;
+        background: rgba(0,5,20,0.5); touch-action:none;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;">
+        <!-- グリッドガイド -->
+        <div style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;
+            background-image:
+                linear-gradient(rgba(0,240,255,0.04) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0,240,255,0.04) 1px, transparent 1px);
+            background-size: 50px 50px;"></div>
+        <!-- セーフエリアガイド線 -->
+        <div id="leSafeAreaGuide" style="position:absolute; pointer-events:none;
+            border: 1px dashed rgba(255,200,0,0.3); box-sizing:border-box; display:none;"></div>
+        <!-- ドラッグコンテナ -->
+        <div id="layoutEditorCanvas" style="position:absolute; top:0; left:0; width:100%; height:calc(100% - 130px); overflow:hidden;"></div>
+        <!-- ヘッダー -->
+        <div style="position:absolute; top:0; left:0; width:100%; padding:8px 16px; box-sizing:border-box;
+            display:flex; justify-content:space-between; align-items:center;
+            background:linear-gradient(180deg, rgba(0,10,30,0.9) 0%, transparent 100%); pointer-events:none;">
+            <span style="color:#00f0ff; font-size:13px; font-weight:bold; text-shadow:0 0 8px rgba(0,240,255,0.5); pointer-events:none;">
+                ⬡ UI LAYOUT EDITOR</span>
+            <span style="color:rgba(255,255,255,0.4); font-size:11px; pointer-events:none;">ドラッグで移動 / 下部でサイズ変更</span>
+        </div>
+        <!-- プロパティパネル -->
+        <div style="position:absolute; bottom:0; left:0; width:100%;
+            background: linear-gradient(180deg, rgba(0,10,30,0.95) 0%, rgba(5,5,15,0.98) 100%);
+            border-top: 1px solid rgba(0,240,255,0.3); box-shadow: 0 -4px 20px rgba(0,240,255,0.15);
+            padding:12px 16px; box-sizing:border-box; display:flex; flex-direction:column; gap:10px; color:#fff;">
+            <!-- 選択パーツ名 + 保存ボタン -->
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span id="leSelectedName" style="color:#0f0; font-size:13px; font-weight:bold; text-shadow:0 0 5px #0f0;">
+                    ★ 対象: 未選択</span>
+                <button id="leBtnClose" class="cyber-btn" style="padding:6px 18px; font-size:12px; border-radius:4px;
+                    background:linear-gradient(135deg, rgba(0,240,255,0.15), rgba(0,240,255,0.05));
+                    border:1px solid rgba(0,240,255,0.5); color:#00f0ff; text-shadow:0 0 6px rgba(0,240,255,0.4);">
+                    ✓ 保存＆終了</button>
+            </div>
+            <!-- スケールスライダー -->
+            <div style="display:flex; align-items:center; gap:10px;">
+                <label style="font-size:11px; color:#aaa; min-width:42px;">サイズ:</label>
+                <input type="range" id="leScaleSlider" min="0.5" max="2.0" step="0.1" value="1.0" disabled
+                    style="flex-grow:1; accent-color:#00f0ff;" />
+                <span id="leScaleVal" style="font-size:12px; color:#00f0ff; min-width:35px; text-align:right;">1.0x</span>
+            </div>
+            <!-- アクションボタン -->
+            <div style="display:flex; gap:8px;">
+                <button id="leBtnResetItem" class="cyber-btn" disabled
+                    style="flex:1; padding:6px; font-size:11px; border-radius:4px;">リセット</button>
+                <button id="leBtnResetAll" class="cyber-btn btn-orange"
+                    style="flex:1; padding:6px; font-size:11px; border-radius:4px;">全て初期化</button>
+            </div>
+        </div>
+    </div>
+
 </body>
 
 </html>

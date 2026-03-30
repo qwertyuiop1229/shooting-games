@@ -16,6 +16,7 @@
       }
     ],
     "predeploy": [
+      "node build-audio.js",
       "node bump-version.js"
     ]
   }

@@ -177,62 +177,152 @@
                 noiseSrc.start();
             }
 
-            const playlistUrls = [
-                "https://shooting-games-1.web.app/oto/1.mp3",
-                "https://shooting-games-1.web.app/oto/2.mp3",
-                "https://shooting-games-1.web.app/oto/3.mp3",
-            ];
-            let musicIndex = 0;
-            function startPlaylist() {
-                if (playlistUrls.length === 0) return;
-                bgmAudio = new Audio();
-                bgmAudio.src = playlistUrls[musicIndex];
-                bgmAudio.loop = false;
-                if (audioCtx && !bgmSource) {
+            let bgmAudioList = { title: [], battle: [] };
+            fetch("oto/audio-list.json")
+                .then(r => r.json())
+                .then(list => {
+                    bgmAudioList = list;
+                    if (window._currentBgmReq === "battle") {
+                        if (typeof window.playBattleBGM === "function") window.playBattleBGM();
+                    } else if (window._currentBgmReq === "title") {
+                        if (typeof window.playTitleBGM === "function") window.playTitleBGM();
+                    }
+                })
+                .catch(e => console.warn("Audio list load skipped or failed.", e));
+
+            let currentBgmMode = null;
+            let battleBgmQueue = [];
+
+            window._currentBgmReq = "title";
+
+            function shuffleArray(arr) {
+                let a = [...arr];
+                for (let i = a.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [a[i], a[j]] = [a[j], a[i]];
+                }
+                return a;
+            }
+
+            window.playTitleBGM = function() {
+                window._currentBgmReq = "title";
+                if (!audioCtx || audioCtx.state === "suspended") return;
+                if (currentBgmMode === "title") return;
+                currentBgmMode = "title";
+
+                if (!bgmAudioList.title || bgmAudioList.title.length === 0) return;
+
+                if (!bgmAudio) {
+                    bgmAudio = new Audio();
                     try {
                         bgmSource = audioCtx.createMediaElementSource(bgmAudio);
                         bgmSource.connect(bgmGainNode);
-                    } catch (e) { }
+                    } catch(e) {}
+                } else {
+                    bgmAudio.pause();
                 }
-                bgmAudio.play().catch((err) => {
-                    console.warn("Audio blocked:", err);
-                });
-                bgmAudio.addEventListener("ended", () => {
-                    musicIndex = (musicIndex + 1) % playlistUrls.length;
-                    bgmAudio.src = playlistUrls[musicIndex];
-                    bgmAudio.play().catch((err) => { });
-                });
+
+                bgmAudio.src = bgmAudioList.title[0];
+                bgmAudio.loop = true;
+                bgmAudio.onended = null;
+                bgmAudio.play().catch(e=>{});
+            };
+
+            window.playBattleBGM = function() {
+                window._currentBgmReq = "battle";
+                if (!audioCtx || audioCtx.state === "suspended") return;
+                if (currentBgmMode === "battle") return;
+                currentBgmMode = "battle";
+
+                if (!bgmAudioList.battle || bgmAudioList.battle.length === 0) return;
+
+                if (!bgmAudio) {
+                    bgmAudio = new Audio();
+                    try {
+                        bgmSource = audioCtx.createMediaElementSource(bgmAudio);
+                        bgmSource.connect(bgmGainNode);
+                    } catch(e) {}
+                } else {
+                    bgmAudio.pause();
+                }
+
+                battleBgmQueue = shuffleArray(bgmAudioList.battle);
+                let idx = 0;
+
+                function playNext() {
+                    if (currentBgmMode !== "battle") return;
+                    if (idx >= battleBgmQueue.length) {
+                        battleBgmQueue = shuffleArray(bgmAudioList.battle);
+                        idx = 0;
+                    }
+                    bgmAudio.src = battleBgmQueue[idx++];
+                    // 終わったら次を再生（1曲ごとに）
+                    bgmAudio.loop = false;
+                    bgmAudio.play().catch(e=>{});
+                }
+                
+                bgmAudio.onended = playNext;
+                playNext();
+            };
+
+            // AudioContextが既に動いていたら初期状態でタイトルBGMを鳴らす
+            if (audioCtx.state === "running") {
+                if (typeof window.playTitleBGM === "function") window.playTitleBGM();
             }
-            startPlaylist();
         }
 
+        // --- UI効果音 (2種類: 通常クリック / 戻る) ---
         function playClickSound() {
             if (!audioCtx || audioCtx.state === "suspended") return;
             const now = audioCtx.currentTime;
             const osc = audioCtx.createOscillator();
-            osc.type = "square";
-            osc.frequency.setValueAtTime(1200, now);
-            osc.frequency.exponentialRampToValueAtTime(600, now + 0.04);
+            osc.type = "sine";
+            osc.frequency.setValueAtTime(1000, now);
+            osc.frequency.setValueAtTime(950, now + 0.015);
             const gain = audioCtx.createGain();
-            gain.gain.setValueAtTime(0, now);
-            gain.gain.linearRampToValueAtTime(0.3, now + 0.01); // タップ音を大きめに設定
-            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+            gain.gain.setValueAtTime(0.15, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.035);
             osc.connect(gain);
             gain.connect(sfxGain);
             osc.start(now);
-            osc.stop(now + 0.06);
+            osc.stop(now + 0.04);
+        }
+
+        function playCancelSound() {
+            if (!audioCtx || audioCtx.state === "suspended") return;
+            const now = audioCtx.currentTime;
+            const osc = audioCtx.createOscillator();
+            osc.type = "sine";
+            osc.frequency.setValueAtTime(900, now);
+            osc.frequency.exponentialRampToValueAtTime(600, now + 0.04);
+            const gain = audioCtx.createGain();
+            gain.gain.setValueAtTime(0.15, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.045);
+            osc.connect(gain);
+            gain.connect(sfxGain);
+            osc.start(now);
+            osc.stop(now + 0.05);
         }
 
         // 全てのボタンにクリック音を委譲で追加
         document.addEventListener("mousedown", (e) => {
-            if (
-                e.target.closest("button") ||
-                e.target.closest(".toggle") ||
-                e.target.closest(".team-btn") ||
-                e.target.closest('input[type="checkbox"]')
-            ) {
-                playClickSound();
+            if (!(e.target.closest("button") || e.target.closest(".toggle") ||
+                  e.target.closest(".team-btn") || e.target.closest('input[type="checkbox"]'))) return;
+            const btn = e.target.closest("button");
+            // 戻る・閉じるボタンだけ別音
+            if (btn && (
+                btn.id === "btnBack" || btn.id === "btnBackToTitle" ||
+                btn.id === "btnResultToHome" || btn.id === "btnLeaveMultiplayer" ||
+                btn.id === "btnLeaveSingleplayer" || btn.id === "btnCancelCreateRoom" ||
+                btn.id === "btnLeaveRoom" || btn.id === "leBtnClose" ||
+                btn.id === "btnDismissLandscape" || btn.id === "btnBackToPauseMain" ||
+                btn.id === "btnBackFromDifficulty" ||
+                btn.classList.contains("btn-red")
+            )) {
+                playCancelSound();
+                return;
             }
+            playClickSound();
         });
 
         function playLaserSound(x, y) {
@@ -535,6 +625,71 @@
         }
         applyFeatureSettingsToRuntime();
 
+        /* ===== UI Layout Manager ===== */
+        const UILayoutManager = (() => {
+            let layoutSettings = {};
+            try {
+                const raw = localStorage.getItem("uiLayout_v1");
+                if (raw) layoutSettings = JSON.parse(raw);
+            } catch (e) {}
+
+            const idsToHandle = [
+                'btnTouchShoot', 'btnTouchPause', 'btnTouchBoost',
+                'btnTouchBrake', 'btnTouchRollLeft', 'btnTouchRollRight',
+                'joystickBase'
+            ];
+
+            const api = {
+                get: (id) => layoutSettings[id] || null,
+                set: (id, x, y, s) => {
+                    layoutSettings[id] = { x, y, s };
+                },
+                save: () => {
+                    try {
+                        localStorage.setItem("uiLayout_v1", JSON.stringify(layoutSettings));
+                    } catch (e) {}
+                    api.applyToDOM();
+                },
+                reset: (id) => {
+                    delete layoutSettings[id];
+                    api.save();
+                },
+                resetAll: () => {
+                    layoutSettings = {};
+                    try { localStorage.removeItem("uiLayout_v1"); } catch(e){}
+                    api.applyToDOM();
+                },
+                applyToDOM: () => {
+                    idsToHandle.forEach(id => {
+                        const el = document.getElementById(id);
+                        if (!el) return;
+                        const cfg = layoutSettings[id];
+                        if (cfg) {
+                            el.style.position = 'fixed';
+                            el.style.left = cfg.x + 'vw';
+                            el.style.top = cfg.y + 'vh';
+                            el.style.transform = `translate(-50%, -50%) scale(${cfg.s})`;
+                        } else {
+                            el.style.position = '';
+                            el.style.left = '';
+                            el.style.top = '';
+                            el.style.transform = '';
+                        }
+                    });
+                }
+            };
+            return api;
+        })();
+
+        // Canvas UI drawing helper
+        function getCanvasLayout(id, defX, defY) {
+            const cfg = UILayoutManager.get(id);
+            if (!cfg) return { x: defX, y: defY, s: 1 };
+            const cw = (canvas.width / dpr);
+            const ch = (canvas.height / dpr);
+            return { x: (cfg.x / 100) * cw, y: (cfg.y / 100) * ch, s: cfg.s };
+        }
+
         let cameraShake = 0;
         function shakeCamera(amount) {
             if (!enableShake) return;
@@ -641,7 +796,7 @@
         let mouse = { x: 0, y: 0, down: false };
         let bindingAction = null;
 
-        const GAME_VERSION = "1.0.15";
+        const GAME_VERSION = "1.0.25";
         let running = false,
             showHelp = false;
         let isPaused = false;
@@ -1046,6 +1201,7 @@
         }
 
         window.leaveMultiplayerRoom = function (showAlert = false, msg = "") {
+            if (typeof window.playTitleBGM === "function") window.playTitleBGM();
             if (hasDisconnectedAlertShown) return;
             isLeavingRoom = true;
             if (showAlert) {
@@ -1814,6 +1970,7 @@
 
         /* ========== 初期化 ========== */
         function initGame() {
+            if (typeof window.playBattleBGM === "function") window.playBattleBGM();
             bullets = [];
             particles = [];
             asteroids = [];
@@ -3932,44 +4089,54 @@
         function drawUI(ctx, vLeft, vRight, vTop, vBottom) {
             const vw = canvas.width / dpr,
                 vh = canvas.height / dpr;
+            const scoreLayout = getCanvasLayout('hud_score', 20 + safeAreaMargin, 36 + safeAreaMargin);
             ctx.save();
+            ctx.translate(scoreLayout.x, scoreLayout.y);
+            ctx.scale(scoreLayout.s, scoreLayout.s);
+
             ctx.fillStyle = "#fff";
-            ctx.font =
-                "16px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+            ctx.font = "16px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
             ctx.shadowColor = "#00f0ff";
             ctx.shadowBlur = 8;
-            if (!window.isMultiplayer)
-                ctx.fillText(`SCORE ${String(ScoreManager.get()).padStart(6, "0")}`, 20, 36);
-            ctx.fillText(`LIVES ${lives}`, 20, window.isMultiplayer ? 36 : 60);
-            if (!window.isMultiplayer) ctx.fillText(`WAVE ${wave}`, 20, 84);
+            
+            let curY = 0;
+            if (!window.isMultiplayer) {
+                ctx.fillText(`SCORE ${String(ScoreManager.get()).padStart(6, "0")}`, 0, curY);
+                curY += 24;
+            }
+            ctx.fillText(`LIVES ${lives}`, 0, curY);
+            curY += 24;
+            if (!window.isMultiplayer) {
+                ctx.fillText(`WAVE ${wave}`, 0, curY);
+                curY += 24;
+            }
             ctx.shadowBlur = 0;
 
             const p = ships.find((s) => s.id === playerId);
             if (p && !p.isGhost) {
-                const x = 20,
-                    y = window.isMultiplayer ? 60 : 108,
-                    w2 = 160,
-                    h2 = 8;
+                const w2 = 160, h2 = 8;
+                curY += 12; // margin for heat gauge
                 ctx.fillStyle = "rgba(0,0,0,0.6)";
-                ctx.fillRect(x - 2, y - 2, w2 + 4, h2 + 4);
+                ctx.fillRect(-2, curY - 2, w2 + 4, h2 + 4);
                 ctx.fillStyle = "#222";
-                ctx.fillRect(x, y, w2, h2);
+                ctx.fillRect(0, curY, w2, h2);
                 const t = p.heat / p.maxHeat;
                 ctx.fillStyle = t > 0.8 ? "#ff0055" : t > 0.5 ? "#ffb300" : "#00f0ff";
                 if (showGlow) {
                     ctx.shadowColor = ctx.fillStyle;
                     ctx.shadowBlur = 5;
                 }
-                ctx.fillRect(x, y, w2 * t, h2);
+                ctx.fillRect(0, curY, w2 * t, h2);
                 ctx.shadowBlur = 0;
                 ctx.fillStyle = "#fff";
                 ctx.font = "12px ui-monospace, monospace";
-                ctx.fillText("HEAT", x, y - 6);
+                ctx.fillText("HEAT", 0, curY - 6);
                 if (p.weaponTimer > 0) {
                     ctx.fillStyle = p.weaponType === 1 ? "#00f0ff" : "#f0f";
-                    ctx.fillText(`WPN: ${Math.ceil(p.weaponTimer)}s`, x, y + 24);
+                    ctx.fillText(`WPN: ${Math.ceil(p.weaponTimer)}s`, 0, curY + 24);
                 }
             }
+            ctx.restore();
 
             if (showHelp) {
                 const lines = [message];
@@ -4024,20 +4191,24 @@
                         (s.lives !== undefined && s.lives > 0) ||
                         (s.id === playerId && lives > 0)),
             ).length;
+            const baseEx = Math.max(16, vw - 180 - safeAreaMargin);
+            const teamLayout = getCanvasLayout('hud_teams', baseEx, 36 + safeAreaMargin);
             ctx.save();
+            ctx.translate(teamLayout.x, teamLayout.y);
+            ctx.scale(teamLayout.s, teamLayout.s);
             ctx.fillStyle = "#00f0ff";
             ctx.font = "16px ui-monospace, monospace";
             ctx.shadowColor = "#00f0ff";
             ctx.shadowBlur = 8;
             ctx.fillText(
                 `ENEMIES ${String(enemiesAlive).padStart(3, " ")}`,
-                Math.max(16, vw - 180),
-                36,
+                0,
+                0,
             );
             ctx.fillText(
                 `ALLIES ${String(alliesAlive).padStart(3, " ")}`,
-                Math.max(16, vw - 180),
-                60,
+                0,
+                24,
             );
             ctx.restore();
 
@@ -4151,31 +4322,44 @@
             ctx.font = "14px ui-monospace, monospace";
             const fpsText = `FPS ${String(fpsDisplay).padStart(2, " ")}`;
             const metrics = ctx.measureText(fpsText);
+            
+            const fpX = vw - metrics.width - 16 - safeAreaMargin;
+            const fpY = vh - 28 - safeAreaMargin;
+            const fpsLayout = getCanvasLayout('hud_fps', fpX, fpY);
+            
+            ctx.translate(fpsLayout.x, fpsLayout.y);
+            ctx.scale(fpsLayout.s, fpsLayout.s);
+            
             ctx.fillStyle = "rgba(0,0,0,0.6)";
-            ctx.fillRect(vw - metrics.width - 16, vh - 28, metrics.width + 12, 22);
+            ctx.fillRect(0, 0, metrics.width + 12, 22);
             ctx.fillStyle = "#00f0ff";
-            ctx.fillText(fpsText, vw - metrics.width - 10, vh - 12);
+            ctx.fillText(fpsText, +6, +16);
             ctx.restore();
 
             if (showMinimap) {
                 const mapW = 140,
                     mapH = 140;
-                const mapX = 12 + safeAreaMargin,
-                    mapY = vh - mapH - 12 - safeAreaMargin;
+                const mX = 12 + safeAreaMargin;
+                const mY = vh - mapH - 12 - safeAreaMargin;
+                const mapLayout = getCanvasLayout('hud_minimap', mX, mY);
+                
                 ctx.save();
+                ctx.translate(mapLayout.x, mapLayout.y);
+                ctx.scale(mapLayout.s, mapLayout.s);
+                
                 ctx.globalAlpha = 0.95;
                 ctx.fillStyle = "rgba(0,10,20,0.7)";
-                ctx.fillRect(mapX - 4, mapY - 4, mapW + 8, mapH + 8);
+                ctx.fillRect(-4, -4, mapW + 8, mapH + 8);
                 ctx.strokeStyle = "rgba(0,240,255,0.4)";
-                ctx.strokeRect(mapX - 4, mapY - 4, mapW + 8, mapH + 8);
+                ctx.strokeRect(-4, -4, mapW + 8, mapH + 8);
                 const sx = mapW / WORLD_W,
                     sy = mapH / WORLD_H;
                 if (showMinimapAsteroids) {
                     for (const a of asteroids) {
                         ctx.fillStyle = "rgba(100,160,160,0.9)";
                         ctx.fillRect(
-                            mapX + (a.x % WORLD_W) * sx - 1,
-                            mapY + (a.y % WORLD_H) * sy - 1,
+                            (a.x % WORLD_W) * sx - 1,
+                            (a.y % WORLD_H) * sy - 1,
                             2,
                             2,
                         );
@@ -4195,8 +4379,8 @@
                                 ? TEAM_COLORS[3]
                                 : TEAM_COLORS[1];
                     ctx.fillRect(
-                        mapX + (al.x % WORLD_W) * sx - 2,
-                        mapY + (al.y % WORLD_H) * sy - 2,
+                        (al.x % WORLD_W) * sx - 2,
+                        (al.y % WORLD_H) * sy - 2,
                         4,
                         4,
                     );
@@ -4209,8 +4393,8 @@
                             ? TEAM_COLORS[en.team]
                             : TEAM_COLORS[2];
                     ctx.fillRect(
-                        mapX + (en.x % WORLD_W) * sx - 2,
-                        mapY + (en.y % WORLD_H) * sy - 2,
+                        (en.x % WORLD_W) * sx - 2,
+                        (en.y % WORLD_H) * sy - 2,
                         4,
                         4,
                     );
@@ -4222,8 +4406,8 @@
                             : TEAM_COLORS[1];
                     ctx.beginPath();
                     ctx.arc(
-                        mapX + (p.x % WORLD_W) * sx,
-                        mapY + (p.y % WORLD_H) * sy,
+                        (p.x % WORLD_W) * sx,
+                        (p.y % WORLD_H) * sy,
                         4,
                         0,
                         TAU,
@@ -4535,6 +4719,7 @@
                     await handleGameOverSubmit();
                 }
 
+                if (typeof window.playTitleBGM === "function") window.playTitleBGM();
                 running = false;
                 gameOverMode = false;
                 isPaused = false;
@@ -5344,14 +5529,6 @@
             setTimeout(() => {
                 window.scrollTo(0, 0);
                 resize();
-                // Force any modals to recalculate position
-                document.querySelectorAll(".game-modal").forEach((m) => {
-                    if (m.style.display !== "none") {
-                        m.style.display = "none";
-                        void m.offsetHeight;
-                        m.style.display = "block";
-                    }
-                });
             }, 100);
             setTimeout(() => {
                 window.scrollTo(0, 0);
@@ -5362,3 +5539,228 @@
         checkAndSetNickname();
         requestAnimationFrame(frame);
     
+        /* ========== UI Layout Editor Logic ========== */
+        function setupLayoutEditor() {
+            const btnOpen = document.getElementById('btnOpenUILayoutEditor');
+            const overlay = document.getElementById('layoutEditorOverlay');
+            const canvasLayer = document.getElementById('layoutEditorCanvas');
+            const btnClose = document.getElementById('leBtnClose');
+            const scaleSlider = document.getElementById('leScaleSlider');
+            const scaleVal = document.getElementById('leScaleVal');
+            const btnResetItem = document.getElementById('leBtnResetItem');
+            const btnResetAll = document.getElementById('leBtnResetAll');
+            const selName = document.getElementById('leSelectedName');
+
+            if (!btnOpen || !overlay) return;
+
+            let selectedBox = null;
+
+            const partsDef = [
+                { id: 'hud_score', label: 'SCORE / LIVES', w: 160, h: 100, isCanvas: true, baseAnchor: 'tl' },
+                { id: 'hud_teams', label: 'ENEMIES / ALLIES', w: 120, h: 60, isCanvas: true, baseAnchor: 'tr' },
+                { id: 'hud_fps', label: 'FPS', w: 70, h: 22, isCanvas: true, baseAnchor: 'br' },
+                { id: 'hud_minimap', label: 'MINIMAP', w: 140, h: 140, isCanvas: true, baseAnchor: 'bl' },
+                { id: 'btnTouchShoot', label: 'SHOOT', isCanvas: false },
+                { id: 'btnTouchPause', label: '||', isCanvas: false },
+                { id: 'btnTouchBoost', label: 'BOOST', isCanvas: false },
+                { id: 'btnTouchBrake', label: 'STOP', isCanvas: false },
+                { id: 'btnTouchRollLeft', label: 'L-SLIDE', isCanvas: false },
+                { id: 'btnTouchRollRight', label: 'R-SLIDE', isCanvas: false },
+                { id: 'joystickBase', label: 'JOYSTICK', isCanvas: false }
+            ];
+
+            btnOpen.addEventListener('click', () => {
+                document.getElementById('pauseSettingsMenu').style.display = 'none';
+                isPaused = true;
+                overlay.style.display = 'block';
+                overlay.style.opacity = '0';
+                requestAnimationFrame(() => {
+                    overlay.style.transition = 'opacity 0.25s ease';
+                    overlay.style.opacity = '1';
+                });
+                // セーフエリアガイド表示
+                const guide = document.getElementById('leSafeAreaGuide');
+                if (guide && safeAreaMargin > 0) {
+                    guide.style.display = 'block';
+                    guide.style.left = safeAreaMargin + 'px';
+                    guide.style.top = safeAreaMargin + 'px';
+                    guide.style.width = (window.innerWidth - safeAreaMargin * 2) + 'px';
+                    guide.style.height = (window.innerHeight - safeAreaMargin * 2) + 'px';
+                }
+                initCanvas();
+            });
+
+            btnClose.addEventListener('click', () => {
+                playClickSound();
+                overlay.style.transition = 'opacity 0.2s ease';
+                overlay.style.opacity = '0';
+                setTimeout(() => {
+                    overlay.style.display = 'none';
+                    overlay.style.transition = '';
+                    const guide = document.getElementById('leSafeAreaGuide');
+                    if (guide) guide.style.display = 'none';
+                }, 200);
+                UILayoutManager.save();
+                UILayoutManager.applyToDOM();
+            });
+
+            function selectBox(box) {
+                if (selectedBox) selectedBox.style.borderColor = 'rgba(255,255,255,0.4)';
+                selectedBox = box;
+                if (box) {
+                    box.style.borderColor = '#0f0';
+                    selName.innerText = '★ 対象: ' + box.dataset.label;
+                    const s = UILayoutManager.get(box.dataset.id)?.s || 1.0;
+                    scaleSlider.value = s;
+                    scaleSlider.disabled = false;
+                    scaleVal.innerText = s.toFixed(1) + 'x';
+                    btnResetItem.disabled = false;
+                } else {
+                    selName.innerText = '★ 対象: 未選択';
+                    scaleSlider.disabled = true;
+                    btnResetItem.disabled = true;
+                }
+            }
+
+            scaleSlider.addEventListener('input', (e) => {
+                if (!selectedBox) return;
+                const val = parseFloat(e.target.value);
+                scaleVal.innerText = val.toFixed(1) + 'x';
+                selectedBox.style.transform = `translate(-50%, -50%) scale(${val})`;
+                let existing = UILayoutManager.get(selectedBox.dataset.id) || { x: parseFloat(selectedBox.dataset.x), y: parseFloat(selectedBox.dataset.y) };
+                UILayoutManager.set(selectedBox.dataset.id, existing.x, existing.y, val);
+            });
+
+            btnResetItem.addEventListener('click', () => {
+                if (!selectedBox) return;
+                UILayoutManager.reset(selectedBox.dataset.id);
+                initCanvas();
+            });
+
+            btnResetAll.addEventListener('click', () => {
+                if (confirm('全てのUI配置をリセットしますか？')) {
+                    UILayoutManager.resetAll();
+                    initCanvas();
+                }
+            });
+
+            function initCanvas() {
+                canvasLayer.innerHTML = '';
+                selectedBox = null;
+                selectBox(null);
+                
+                partsDef.forEach(def => {
+                    if (!def.isCanvas && !document.getElementById(def.id)) return;
+                    
+                    const box = document.createElement('div');
+                    box.className = 'le-box';
+                    box.dataset.id = def.id;
+                    box.dataset.label = def.label;
+                    box.innerText = def.label;
+                    box.style.position = 'absolute';
+                    box.style.display = 'flex';
+                    box.style.alignItems = 'center';
+                    box.style.justifyContent = 'center';
+                    box.style.backgroundColor = 'rgba(0, 240, 255, 0.2)';
+                    box.style.border = '2px dashed rgba(255,255,255,0.4)';
+                    box.style.color = '#fff';
+                    box.style.fontSize = '12px';
+                    box.style.fontWeight = 'bold';
+                    box.style.userSelect = 'none';
+                    box.style.cursor = 'grab';
+                    box.style.textShadow = '0 0 4px #000';
+                    box.style.touchAction = 'none';
+                    
+                    let saved = UILayoutManager.get(def.id);
+                    let s = saved ? saved.s : 1.0;
+                    let xPct = saved ? saved.x : 50;
+                    let yPct = saved ? saved.y : 50;
+
+                    if (!saved) {
+                        if (!def.isCanvas) {
+                            const el = document.getElementById(def.id);
+                            if (el) {
+                                const rect = el.getBoundingClientRect();
+                                xPct = (rect.left + rect.width / 2) / window.innerWidth * 100;
+                                yPct = (rect.top + rect.height / 2) / window.innerHeight * 100;
+                                box.style.width = Math.max(60, rect.width) + 'px';
+                                box.style.height = Math.max(60, rect.height) + 'px';
+                                box.style.borderRadius = getComputedStyle(el).borderRadius;
+                            }
+                        } else {
+                            box.style.width = def.w + 'px';
+                            box.style.height = def.h + 'px';
+                            if (def.baseAnchor === 'tl') { xPct = (20 + def.w/2) / window.innerWidth * 100; yPct = (36 + def.h/2) / window.innerHeight * 100; }
+                            if (def.baseAnchor === 'tr') { xPct = (window.innerWidth - 180 + def.w/2) / window.innerWidth * 100; yPct = (36 + def.h/2) / window.innerHeight * 100; }
+                            if (def.baseAnchor === 'bl') { xPct = (12 + def.w/2) / window.innerWidth * 100; yPct = (window.innerHeight - 152 + def.h/2) / window.innerHeight * 100; }
+                            if (def.baseAnchor === 'br') { xPct = (window.innerWidth - 86 + def.w/2) / window.innerWidth * 100; yPct = (window.innerHeight - 34 + def.h/2) / window.innerHeight * 100; }
+                        }
+                    } else {
+                        if (!def.isCanvas) {
+                            const el = document.getElementById(def.id);
+                            box.style.width = (el ? el.offsetWidth : 60) + 'px';
+                            box.style.height = (el ? el.offsetHeight : 60) + 'px';
+                            if(el) box.style.borderRadius = getComputedStyle(el).borderRadius;
+                        } else {
+                            box.style.width = def.w + 'px';
+                            box.style.height = def.h + 'px';
+                        }
+                    }
+                    
+                    box.dataset.x = xPct;
+                    box.dataset.y = yPct;
+                    box.style.left = xPct + '%';
+                    box.style.top = yPct + '%';
+                    box.style.transform = `translate(-50%, -50%) scale(${s})`;
+                    
+                    let isDragging = false;
+                    let offsetX, offsetY;
+                    
+                    function onPointerDown(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        isDragging = true;
+                        selectBox(box);
+                        const rect = box.getBoundingClientRect();
+                        offsetX = e.clientX - rect.left - rect.width/2;
+                        offsetY = e.clientY - rect.top - rect.height/2;
+                        box.setPointerCapture(e.pointerId);
+                        box.style.cursor = 'grabbing';
+                    }
+                    function onPointerMove(e) {
+                        if (!isDragging) return;
+                        e.preventDefault();
+                        let nx = e.clientX - offsetX;
+                        let ny = e.clientY - offsetY;
+                        let pctX = nx / window.innerWidth * 100;
+                        let pctY = ny / window.innerHeight * 100;
+                        const panelH = 130;
+                        const maxYpct = (window.innerHeight - panelH) / window.innerHeight * 100;
+                        pctX = Math.max(2, Math.min(98, pctX));
+                        pctY = Math.max(2, Math.min(maxYpct, pctY));
+                        
+                        box.dataset.x = pctX;
+                        box.dataset.y = pctY;
+                        box.style.left = pctX + '%';
+                        box.style.top = pctY + '%';
+                        let curS = UILayoutManager.get(def.id)?.s || 1.0;
+                        UILayoutManager.set(def.id, pctX, pctY, curS);
+                    }
+                    function onPointerUp(e) {
+                        if (!isDragging) return;
+                        isDragging = false;
+                        box.releasePointerCapture(e.pointerId);
+                        box.style.cursor = 'grab';
+                    }
+                    
+                    box.addEventListener('pointerdown', onPointerDown);
+                    box.addEventListener('pointermove', onPointerMove);
+                    box.addEventListener('pointerup', onPointerUp);
+                    box.addEventListener('pointercancel', onPointerUp);
+                    
+                    canvasLayer.appendChild(box);
+                });
+            }
+        }
+        setupLayoutEditor();
+        UILayoutManager.applyToDOM();

@@ -883,7 +883,7 @@
         let mouse = { x: 0, y: 0, down: false };
         let bindingAction = null;
 
-        const GAME_VERSION = "1.0.48";
+        const GAME_VERSION = "1.0.50";
         let running = false,
             showHelp = false;
         let isPaused = false;
@@ -4734,9 +4734,13 @@
             }
             if (safeAreaXSlider) {
                 safeAreaXSlider.value = safeAreaMarginX;
+                const safeAreaValueX = document.getElementById("safeAreaValueX");
+                if (safeAreaValueX) safeAreaValueX.innerText = safeAreaMarginX + "px";
             }
             if (safeAreaYSlider) {
                 safeAreaYSlider.value = safeAreaMarginY;
+                const safeAreaValueY = document.getElementById("safeAreaValueY");
+                if (safeAreaValueY) safeAreaValueY.innerText = safeAreaMarginY + "px";
             }
         }
 
@@ -5156,14 +5160,20 @@
             saveFeatureSettings(featureSettings);
         });
         const safeAreaXSlider = document.getElementById("safeAreaXSlider");
+        const safeAreaValueX = document.getElementById("safeAreaValueX");
         safeAreaXSlider?.addEventListener("input", (e) => {
-            featureSettings.safeAreaMarginX = parseInt(e.target.value) || 0;
+            const val = parseInt(e.target.value) || 0;
+            featureSettings.safeAreaMarginX = val;
+            if (safeAreaValueX) safeAreaValueX.innerText = val + "px";
             applyFeatureSettingsToRuntime();
             saveFeatureSettings(featureSettings);
         });
         const safeAreaYSlider = document.getElementById("safeAreaYSlider");
+        const safeAreaValueY = document.getElementById("safeAreaValueY");
         safeAreaYSlider?.addEventListener("input", (e) => {
-            featureSettings.safeAreaMarginY = parseInt(e.target.value) || 0;
+            const val = parseInt(e.target.value) || 0;
+            featureSettings.safeAreaMarginY = val;
+            if (safeAreaValueY) safeAreaValueY.innerText = val + "px";
             applyFeatureSettingsToRuntime();
             saveFeatureSettings(featureSettings);
         });

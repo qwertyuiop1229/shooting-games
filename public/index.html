@@ -1253,10 +1253,18 @@
 
                         <div class="settings-section-header">システム</div>
                         <div class="setting-row">
-                            <div>画面の角丸マージン</div>
+                            <div>画面余白 (横)</div>
                             <div style="display:flex;align-items:center;gap:8px;">
-                                <input type="range" id="safeAreaSlider" min="0" max="60" step="1" value="0" />
-                                <span id="safeAreaValue"
+                                <input type="range" id="safeAreaXSlider" min="0" max="100" step="1" value="0" />
+                                <span id="safeAreaValueX"
+                                    style="font-size:12px;color:#00f0ff;min-width:30px;text-align:right;">0px</span>
+                            </div>
+                        </div>
+                        <div class="setting-row">
+                            <div>画面余白 (縦)</div>
+                            <div style="display:flex;align-items:center;gap:8px;">
+                                <input type="range" id="safeAreaYSlider" min="0" max="100" step="1" value="0" />
+                                <span id="safeAreaValueY"
                                     style="font-size:12px;color:#00f0ff;min-width:30px;text-align:right;">0px</span>
                             </div>
                         </div>

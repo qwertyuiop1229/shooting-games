@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const publicDir = path.join(__dirname, 'public');
+const publicDir = path.join(__dirname, '..', 'public');
 const otoDir = path.join(publicDir, 'oto');
 const titleDir = path.join(otoDir, 'title');
 const battleDir = path.join(otoDir, 'battle');

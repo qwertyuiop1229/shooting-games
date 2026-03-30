@@ -177,6 +177,14 @@
                 noiseSrc.start();
             }
 
+            if (!bgmAudio) {
+                bgmAudio = new Audio();
+                try {
+                    bgmSource = audioCtx.createMediaElementSource(bgmAudio);
+                    bgmSource.connect(bgmGainNode);
+                } catch(e) {}
+            }
+
             let bgmAudioList = { title: [], battle: [] };
             fetch("oto/audio-list.json")
                 .then(r => r.json())
@@ -207,21 +215,14 @@
             window.playTitleBGM = function() {
                 window._currentBgmReq = "title";
                 if (!audioCtx || audioCtx.state === "suspended") return;
+                if (!bgmAudioList.title || bgmAudioList.title.length === 0) {
+                    currentBgmMode = null;
+                    return;
+                }
                 if (currentBgmMode === "title") return;
                 currentBgmMode = "title";
 
-                if (!bgmAudioList.title || bgmAudioList.title.length === 0) return;
-
-                if (!bgmAudio) {
-                    bgmAudio = new Audio();
-                    try {
-                        bgmSource = audioCtx.createMediaElementSource(bgmAudio);
-                        bgmSource.connect(bgmGainNode);
-                    } catch(e) {}
-                } else {
-                    bgmAudio.pause();
-                }
-
+                bgmAudio.pause();
                 bgmAudio.src = bgmAudioList.title[0];
                 bgmAudio.loop = true;
                 bgmAudio.onended = null;
@@ -231,21 +232,14 @@
             window.playBattleBGM = function() {
                 window._currentBgmReq = "battle";
                 if (!audioCtx || audioCtx.state === "suspended") return;
+                if (!bgmAudioList.battle || bgmAudioList.battle.length === 0) {
+                    currentBgmMode = null;
+                    return;
+                }
                 if (currentBgmMode === "battle") return;
                 currentBgmMode = "battle";
 
-                if (!bgmAudioList.battle || bgmAudioList.battle.length === 0) return;
-
-                if (!bgmAudio) {
-                    bgmAudio = new Audio();
-                    try {
-                        bgmSource = audioCtx.createMediaElementSource(bgmAudio);
-                        bgmSource.connect(bgmGainNode);
-                    } catch(e) {}
-                } else {
-                    bgmAudio.pause();
-                }
-
+                bgmAudio.pause();
                 battleBgmQueue = shuffleArray(bgmAudioList.battle);
                 let idx = 0;
 
@@ -263,6 +257,12 @@
                 
                 bgmAudio.onended = playNext;
                 playNext();
+            };
+
+            window.stopBGM = function() {
+                window._currentBgmReq = null;
+                currentBgmMode = null;
+                if (bgmAudio) bgmAudio.pause();
             };
 
             // AudioContextが既に動いていたら初期状態でタイトルBGMを鳴らす
@@ -434,7 +434,22 @@
         // 画面のどこかをクリック/キー入力した段階で即座にオーディオを有効化する
         function enableAudioGlobally() {
             if (!audioCtx) initAudio();
-            if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+            
+            // ユーザー操作の同期コールスタック内でダミー再生を行うことでメディア再生制限を確実に解除する
+            if (bgmAudio && bgmAudio.paused) {
+                let p = bgmAudio.play();
+                if (p && p.catch) p.catch(() => {});
+            }
+
+            if (audioCtx && audioCtx.state === "suspended") {
+                audioCtx.resume().then(() => {
+                    if (window._currentBgmReq === "battle" && typeof window.playBattleBGM === "function") window.playBattleBGM();
+                    else if (window._currentBgmReq === "title" && typeof window.playTitleBGM === "function") window.playTitleBGM();
+                });
+            } else if (audioCtx && audioCtx.state === "running") {
+                if (window._currentBgmReq === "battle" && typeof window.playBattleBGM === "function") window.playBattleBGM();
+                else if (window._currentBgmReq === "title" && typeof window.playTitleBGM === "function") window.playTitleBGM();
+            }
         }
         window.addEventListener("mousedown", () => {
             enableAudioGlobally();
@@ -796,7 +811,7 @@
         let mouse = { x: 0, y: 0, down: false };
         let bindingAction = null;
 
-        const GAME_VERSION = "1.0.25";
+        const GAME_VERSION = "1.0.30";
         let running = false,
             showHelp = false;
         let isPaused = false;
@@ -1895,6 +1910,7 @@
         };
 
         function startCountdownAndPlay(settings) {
+            if (typeof window.stopBGM === "function") window.stopBGM();
             document.getElementById("roomWaitModal").style.display = "none";
             const cdUI = document.getElementById("countdownUI");
             cdUI.style.display = "block";
@@ -1932,6 +1948,7 @@
         }
 
         function startSinglePlayerCountdown() {
+            if (typeof window.stopBGM === "function") window.stopBGM();
             document.getElementById("modeSelectModal").style.display = "none";
             const cdUI = document.getElementById("countdownUI");
             cdUI.style.display = "block";

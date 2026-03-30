@@ -66,4 +66,6 @@ node_modules/
 .env
 
 # dataconnect generated files
-.dataconnect
+
+# Documentation and temporary notes
+docs/

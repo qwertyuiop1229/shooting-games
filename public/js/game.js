@@ -1690,10 +1690,15 @@ window.connectToPhoton = function (roomId, isHost) {
         return;
     }
     updatePhotonStatus("通信を確立中...");
+
+    // 本番環境とテスト環境でPhotonのマッチング空間を隔離する
+    const isProd = window.currentFirebaseProjectId === "astro-fray";
+    const appVersion = isProd ? "prod_1.0" : "dev_1.0";
+
     photonClient = new Photon.LoadBalancing.LoadBalancingClient(
         Photon.ConnectionProtocol.Wss,
         PHOTON_APP_ID,
-        "1.0",
+        appVersion
     );
 
     photonClient.onStateChange = function (state) {

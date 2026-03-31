@@ -2013,6 +2013,9 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         const auth = getAuth(app);
+        
+        // Photon等から環境情報を参照できるようにグローバルスコープへ露出
+        window.currentFirebaseProjectId = firebaseConfig.projectId;
         function normalizeToNumber(v) {
             if (v === null || v === undefined) return null;
             if (typeof v === "number" && isFinite(v)) return Math.floor(v);

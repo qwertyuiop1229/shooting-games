@@ -18,7 +18,11 @@
     ],
     "predeploy": [
       "node scripts/build-audio.js",
-      "node scripts/bump-version.js"
+      "node scripts/bump-version.js",
+      "node scripts/obfuscate.js"
+    ],
+    "postdeploy": [
+      "node scripts/restore.js"
     ]
   }
 }

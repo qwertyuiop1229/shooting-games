@@ -1,5 +1,6 @@
 {
   "projects": {
-    "default": "shooting-games-1"
+    "dev": "shooting-games-1",
+    "production": "astro-fray"
   }
 }

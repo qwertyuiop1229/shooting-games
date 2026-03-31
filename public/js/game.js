@@ -883,7 +883,7 @@ let keys = {};
 let mouse = { x: 0, y: 0, down: false };
 let bindingAction = null;
 
-const GAME_VERSION = "1.0.54";
+const GAME_VERSION = "1.0.60";
 let running = false,
     showHelp = false;
 let isPaused = false;
@@ -2569,6 +2569,15 @@ const ScoreManager = (function () {
     };
 })();
 
+// 簡単なSHA-256風のハッシュ文字列を生成する関数（改ざん検知用）
+async function generateSignature(score, playTime) {
+    const raw = score + "_" + playTime + "_AstroFraySuperSecretKey";
+    const msgBuffer = new TextEncoder().encode(raw);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 // チート対策: プレイ開始時間のメモリ秘匿
 const TimeManager = (function () {
     let _timeKey = Math.floor(Math.random() * 100000);
@@ -2625,8 +2634,7 @@ async function handleGameOverSubmit() {
     const playTimeSeconds = startT === 0 ? 0 : (Date.now() - startT) / 1000;
 
     // 時間整合性チェック (1秒あたり最大300点稼げると仮定)
-    // 例: 即座に全敵を破壊した場合のバッファも少々加味
-    const maxPossibleScore = Math.max(3000, playTimeSeconds * 300);
+    const maxPossibleScore = playTimeSeconds * 300;
 
     if (currentScore > maxPossibleScore) {
         console.warn("異常なスコアを検出しました");
@@ -2638,11 +2646,24 @@ async function handleGameOverSubmit() {
 
     message = `MISSION FAILED - スコア送信中...`;
     const diff = window.currentDifficulty || "normal";
-    if (window.submitScoreToServer)
-        await window.submitScoreToServer(currentScore, diff, playTimeSeconds);
+    if (window.submitScoreToServer) {
+        // 署名を生成して一緒に送る
+        const signature = await generateSignature(currentScore, playTimeSeconds);
+        let res = await window.submitScoreToServer(currentScore, diff, playTimeSeconds, signature);
+        if (res && !res.ok) {
+            if (res.reason === 'permission-denied') {
+                document.getElementById('cheatWarningModal').style.display = 'block';
+            } else {
+                document.getElementById('networkErrorModal').style.display = 'block';
+            }
+        }
+    }
     message = `MISSION FAILED - ランキング取得中...`;
-    if (window.fetchTopRanks)
-        displayRanking(await window.fetchTopRanks(diff));
+    if (window.fetchTopRanks) {
+        const ranks = await window.fetchTopRanks(diff);
+        const myName = localStorage.getItem("playerNickname_v1") || "UNKNOWN";
+        displayRanking(ranks, diff, currentScore, myName);
+    }
 }
 
 function handleMatchEnd(winningTeam) {
@@ -2699,25 +2720,82 @@ function showResultModal(winningTeam) {
         });
 }
 
-function displayRanking(ranks) {
+function displayRanking(ranks, currentDiff = null, myScore = null, myName = null) {
     const rankingListDiv = document.getElementById("rankingList");
     if (!rankingListDiv) return;
-    let html = "<ol>";
+    
+    if (currentDiff) {
+        document.querySelectorAll(".rank-tab").forEach(tab => {
+            if (tab.dataset.diff === currentDiff) {
+                tab.classList.add("rank-tab-active");
+            } else {
+                tab.classList.remove("rank-tab-active");
+            }
+        });
+    }
+
+    let html = "<ul style='margin:5px 0; padding-left:10px; list-style:none;'>";
     if (ranks && ranks.length > 0) {
         ranks.forEach((r, index) => {
             const name = r.name
                 ? String(r.name).replace(/</g, "&lt;").replace(/>/g, "&gt;")
                 : "UNKNOWN";
             const pscore = Number.isFinite(r.score) ? r.score : 0;
-            html += `<li><span>${index + 1}. ${name}</span><span>${pscore}</span></li>`;
+            const ptime = Number.isFinite(r.playTimeSeconds) ? r.playTimeSeconds : 0;
+            const mins = Math.floor(ptime / 60);
+            const secs = Math.floor(ptime % 60);
+            const timeStr = mins > 0 ? `${mins}分${secs}秒` : `${secs}秒`;
+            
+            const isMe = (myScore !== null && myName !== null && pscore === myScore && r.name === myName);
+            const highlightStyle = isMe ? "background:rgba(0,240,255,0.2); border:1px dashed #00f0ff; box-shadow:0 0 10px rgba(0,240,255,0.1); border-radius:4px;" : "border-bottom:1px solid rgba(255,255,255,0.1);";
+            const idAttr = isMe ? "id='my-latest-rank'" : "";
+
+            html += `<li ${idAttr} style="padding:6px; margin-bottom:4px; display:flex; align-items:center; ${highlightStyle}">
+                <span style="display:inline-block; min-width:140px; font-weight:${isMe?'bold':'normal'}; color:${isMe?'#00f0ff':'#ccc'};">${index + 1}. ${name}</span>
+                <span style="color:#ffaa00; font-weight:${isMe?'bold':'normal'};">${pscore} pt</span>
+                <span style="font-size:11px; color:#aaa; margin-left:auto;">[ ${timeStr} ]</span>
+            </li>`;
         });
     } else {
         html += "<li>データがありません</li>";
     }
-    html += "</ol>";
+    html += "</ul>";
     rankingListDiv.innerHTML = html;
     document.getElementById("rankingModal").style.display = "block";
     if (running && !gameOverMode) setPauseState(true);
+
+    // ハイライト行が見つかった場合は中央へスムーズスクロール
+    requestAnimationFrame(() => {
+        const target = document.getElementById("my-latest-rank");
+        if (target && rankingListDiv) {
+            const duration = 1000; // 1秒(1000ms)
+            const containerHeight = rankingListDiv.clientHeight;
+            const targetTop = target.offsetTop;
+            const targetHeight = target.offsetHeight;
+            const scrollTargetY = targetTop - (containerHeight / 2) + (targetHeight / 2);
+            
+            const maxScrollY = rankingListDiv.scrollHeight - containerHeight;
+            const finalScrollY = Math.max(0, Math.min(scrollTargetY, maxScrollY));
+            const startY = rankingListDiv.scrollTop;
+            const distance = finalScrollY - startY;
+            
+            if (distance === 0) return;
+
+            const startTime = performance.now();
+            function step(currentTime) {
+                const elapsed = currentTime - startTime;
+                const progress = Math.min(elapsed / duration, 1);
+                const ease = progress < 0.5 ? 2 * progress * progress : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+                
+                rankingListDiv.scrollTop = startY + distance * ease;
+                
+                if (progress < 1) {
+                    requestAnimationFrame(step);
+                }
+            }
+            requestAnimationFrame(step);
+        }
+    });
 }
 
 /* ========== 更新 ========== */

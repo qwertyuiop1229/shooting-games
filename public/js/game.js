@@ -294,7 +294,9 @@ function initAudio() {
                 bgmAudio.play().catch(e => { });
             }
 
-            bgmAudio.onended = playNext;
+            bgmAudio.onended = () => {
+                setTimeout(playNext, 2000);
+            };
             playNext();
         });
     };
@@ -883,7 +885,7 @@ let keys = {};
 let mouse = { x: 0, y: 0, down: false };
 let bindingAction = null;
 
-const GAME_VERSION = "1.0.65";
+const GAME_VERSION = "1.0.66";
 let running = false,
     showHelp = false;
 let isPaused = false;
@@ -2063,7 +2065,7 @@ function startCountdownAndPlay(settings) {
                     initGame();
                 }
             }, 1000);
-        }, 1200);
+        }, 2200);
     });
 }
 
@@ -2106,7 +2108,7 @@ function startSinglePlayerCountdown() {
                     initGame();
                 }
             }, 1000);
-        }, 1200);
+        }, 2200);
     });
 }
 
@@ -2343,11 +2345,11 @@ function initGame() {
 }
 
 /* ========== エンティティ生成 ========== */
-function makeAIShip(faction) {
+function makeAIShip(faction, overrideDiff = null) {
     const id = idGen++;
     let team = 2; // デフォルト敵
     if (faction === "ally") team = window.isMultiplayer ? 1 : 3;
-    const diff = window.isMultiplayer ? "normal" : window.currentDifficulty;
+    const diff = overrideDiff || (window.isMultiplayer ? "normal" : window.currentDifficulty);
 
     // 難易度別ステータス
     let turnSpd = 0.1,
@@ -2761,7 +2763,7 @@ function showResultModal(winningTeam) {
 function displayRanking(ranks, currentDiff = null, myScore = null, myName = null) {
     const rankingListDiv = document.getElementById("rankingList");
     if (!rankingListDiv) return;
-    
+
     if (currentDiff) {
         document.querySelectorAll(".rank-tab").forEach(tab => {
             if (tab.dataset.diff === currentDiff) {
@@ -2783,14 +2785,14 @@ function displayRanking(ranks, currentDiff = null, myScore = null, myName = null
             const mins = Math.floor(ptime / 60);
             const secs = Math.floor(ptime % 60);
             const timeStr = mins > 0 ? `${mins}分${secs}秒` : `${secs}秒`;
-            
+
             const isMe = (myScore !== null && myName !== null && pscore === myScore && r.name === myName);
             const highlightStyle = isMe ? "background:rgba(0,240,255,0.2); border:1px dashed #00f0ff; box-shadow:0 0 10px rgba(0,240,255,0.1); border-radius:4px;" : "border-bottom:1px solid rgba(255,255,255,0.1);";
             const idAttr = isMe ? "id='my-latest-rank'" : "";
 
             html += `<li ${idAttr} style="padding:6px; margin-bottom:4px; display:flex; align-items:center; ${highlightStyle}">
-                <span style="display:inline-block; min-width:140px; font-weight:${isMe?'bold':'normal'}; color:${isMe?'#00f0ff':'#ccc'};">${index + 1}. ${name}</span>
-                <span style="color:#ffaa00; font-weight:${isMe?'bold':'normal'};">${pscore} pt</span>
+                <span style="display:inline-block; min-width:140px; font-weight:${isMe ? 'bold' : 'normal'}; color:${isMe ? '#00f0ff' : '#ccc'};">${index + 1}. ${name}</span>
+                <span style="color:#ffaa00; font-weight:${isMe ? 'bold' : 'normal'};">${pscore} pt</span>
                 <span style="font-size:11px; color:#aaa; margin-left:auto;">[ ${timeStr} ]</span>
             </li>`;
         });
@@ -2811,12 +2813,12 @@ function displayRanking(ranks, currentDiff = null, myScore = null, myName = null
             const targetTop = target.offsetTop;
             const targetHeight = target.offsetHeight;
             const scrollTargetY = targetTop - (containerHeight / 2) + (targetHeight / 2);
-            
+
             const maxScrollY = rankingListDiv.scrollHeight - containerHeight;
             const finalScrollY = Math.max(0, Math.min(scrollTargetY, maxScrollY));
             const startY = rankingListDiv.scrollTop;
             const distance = finalScrollY - startY;
-            
+
             if (distance === 0) return;
 
             const startTime = performance.now();
@@ -2824,9 +2826,9 @@ function displayRanking(ranks, currentDiff = null, myScore = null, myName = null
                 const elapsed = currentTime - startTime;
                 const progress = Math.min(elapsed / duration, 1);
                 const ease = progress < 0.5 ? 2 * progress * progress : 1 - Math.pow(-2 * progress + 2, 2) / 2;
-                
+
                 rankingListDiv.scrollTop = startY + distance * ease;
-                
+
                 if (progress < 1) {
                     requestAnimationFrame(step);
                 }
@@ -3261,8 +3263,14 @@ function update(dt) {
                 const bAng = Math.atan2(closestBullet.vy, closestBullet.vx);
                 const perpDir = s.id % 2 === 0 ? 1 : -1;
                 const evadeAng = bAng + (Math.PI / 2) * perpDir;
-                s.vx += Math.cos(evadeAng) * s.thrust * 2.0;
-                s.vy += Math.sin(evadeAng) * s.thrust * 2.0;
+                const evadePower = aiDiff === "hard" ? 3.5 : 2.0;
+                s.vx += Math.cos(evadeAng) * s.thrust * evadePower;
+                s.vy += Math.sin(evadeAng) * s.thrust * evadePower;
+                if (aiDiff === "hard" && s.heat < s.maxHeat - 10) {
+                    s.heat += 10;
+                    s.boostTimer = 0.3;
+                    s.boosting = true;
+                }
                 avoided = true;
             }
         }
@@ -5724,7 +5732,7 @@ function startTestPlay(settings) {
         window.currentDifficulty = teamConfig.difficulty;
         for (let i = 0; i < teamConfig.aiCount; i++) {
             const isAlly = teamConfig.team === pTeam;
-            const s = makeAIShip(isAlly ? "ally" : "enemy");
+            const s = makeAIShip(isAlly ? "ally" : "enemy", teamConfig.difficulty);
             s.team = teamConfig.team;
             s.hp = settings.aiHp;
             s.maxHp = settings.aiHp;

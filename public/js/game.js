@@ -471,6 +471,8 @@ function playPowerUpSound() {
 let defaultControlMode = "mouse";
 
 let controlMode = localStorage.getItem("controlMode_v1") || defaultControlMode;
+let minecraftMode = localStorage.getItem("minecraftMode_v1") === "1";
+let minecraftSensitivity = parseFloat(localStorage.getItem("minecraftSensitivity_v1") || "5");
 // デバイス判定: navigator.userAgentData (高精度) → UA文字列 → タッチ機能のフォールバック
 const isMobileDevice = (() => {
     // 1. navigator.userAgentData が使える場合（Chrome 90+ 等）
@@ -1194,10 +1196,10 @@ if (window.visualViewport) {
     window.visualViewport.addEventListener("resize", resize);
 }
 let keys = {};
-let mouse = { x: 0, y: 0, down: false };
+let mouse = { x: 0, y: 0, movementX: 0, movementY: 0, down: false };
 let bindingAction = null;
 
-const GAME_VERSION = "1.0.77";
+const GAME_VERSION = "1.0.82";
 let running = false,
     showHelp = false;
 let isPaused = false;
@@ -1215,6 +1217,7 @@ function setPauseState(paused) {
 
     if (paused) {
         if (!window.isMultiplayer) running = false;
+        if (!isMobileDevice && document.pointerLockElement === canvas) document.exitPointerLock();
         document.getElementById("pauseSettingsMenu").style.display = "block";
 
         isSettingsFromHome = false;
@@ -1250,6 +1253,9 @@ function setPauseState(paused) {
             )
                 m.style.display = "none";
         });
+        if (minecraftMode && controlMode === "mouse" && !isMobileDevice) {
+            try { canvas.requestPointerLock(); } catch(e) {}
+        }
     }
     updateTouchUIVisibility();
 }
@@ -1315,11 +1321,29 @@ window.addEventListener("mousemove", (e) => {
     const rect = canvas.getBoundingClientRect();
     mouse.x = e.clientX - rect.left;
     mouse.y = e.clientY - rect.top;
+    if (document.pointerLockElement === canvas) {
+        mouse.movementX = (mouse.movementX || 0) + e.movementX;
+        mouse.movementY = (mouse.movementY || 0) + e.movementY;
+    }
 });
 window.addEventListener("mousedown", (e) => {
-    if (e.target === canvas) mouse.down = true;
+    if (e.target === canvas) {
+        mouse.down = true;
+        if (minecraftMode && !isPaused && !document.pointerLockElement && controlMode === "mouse" && !isMobileDevice) {
+            try { canvas.requestPointerLock(); } catch(e) {}
+        }
+    }
 });
 window.addEventListener("mouseup", () => (mouse.down = false));
+document.addEventListener("pointerlockchange", () => {
+    if (minecraftMode && controlMode === "mouse" && !isMobileDevice) {
+        if (document.pointerLockElement !== canvas) {
+            if (!isPaused && running && !matchEnded) {
+                setPauseState(true);
+            }
+        }
+    }
+});
 window.addEventListener("wheel", (e) => {
     if (!running || isPaused || matchEnded) return;
     if (e.deltaY < 0) {
@@ -1491,6 +1515,46 @@ function endJoystick(e) {
 }
 joystickArea.addEventListener("touchend", endJoystick);
 joystickArea.addEventListener("touchcancel", endJoystick);
+
+const touchPanArea = document.getElementById("touchPanArea");
+let touchPanActive = false;
+let touchPanId = null;
+let lastTouchPanX = 0;
+touchPanArea?.addEventListener("touchstart", (e) => {
+    e.preventDefault();
+    if (touchPanActive) return;
+    const touch = e.changedTouches[0];
+    touchPanId = touch.identifier;
+    touchPanActive = true;
+    lastTouchPanX = touch.clientX;
+});
+touchPanArea?.addEventListener("touchmove", (e) => {
+    e.preventDefault();
+    if (!touchPanActive) return;
+    for (let i = 0; i < e.changedTouches.length; i++) {
+        const touch = e.changedTouches[i];
+        if (touch.identifier === touchPanId) {
+            const dx = touch.clientX - lastTouchPanX;
+            lastTouchPanX = touch.clientX;
+            if (minecraftMode) {
+                mouse.movementX = (mouse.movementX || 0) + dx * 1.5;
+            }
+            break;
+        }
+    }
+}, { passive: false });
+function endTouchPan(e) {
+    if (!touchPanActive) return;
+    for (let i = 0; i < e.changedTouches.length; i++) {
+        if (e.changedTouches[i].identifier === touchPanId) {
+            touchPanActive = false;
+            touchPanId = null;
+            break;
+        }
+    }
+}
+touchPanArea?.addEventListener("touchend", endTouchPan);
+touchPanArea?.addEventListener("touchcancel", endTouchPan);
 
 // Pinch to Zoom support
 let initialPinchDistance = null;
@@ -3217,7 +3281,13 @@ function update(dt) {
                 isAnyPressedForBind(keyBindings.rollRight) || keys["e"];
 
             // Touch aim override
-            if (controlMode === "touch" && keys["touch_aim"]) {
+            if (minecraftMode) {
+                const sensitivity = 0.003 * (minecraftSensitivity / 5);
+                player.angle += mouse.movementX * sensitivity;
+                mouse.movementX = 0;
+                mouse.movementY = 0;
+                if (controlMode === "touch" && keys["touch_thrust"]) thrustKey = true;
+            } else if (controlMode === "touch" && keys["touch_aim"]) {
                 player.angle = angleLerp(player.angle, keys["touch_angle"], 0.28);
                 if (keys["touch_thrust"]) thrustKey = true;
             } else if (controlMode === "mouse") {
@@ -3321,7 +3391,12 @@ function update(dt) {
             const turnRight =
                 controlMode === "keyboard" &&
                 isAnyPressedForBind(keyBindings.turnRight);
-            if (controlMode === "touch" && keys["touch_aim"]) {
+            if (minecraftMode) {
+                const sensitivity = 0.003 * (minecraftSensitivity / 5);
+                player.angle += mouse.movementX * sensitivity;
+                mouse.movementX = 0;
+                mouse.movementY = 0;
+            } else if (controlMode === "touch" && keys["touch_aim"]) {
                 player.angle = angleLerp(player.angle, keys["touch_angle"], 0.28);
             } else if (controlMode === "mouse") {
                 const canvasRect = canvas.getBoundingClientRect();
@@ -4201,9 +4276,19 @@ function render() {
     ctx.save();
     ctx.translate(vw / 2, vh / 2);
     ctx.scale(zoomLevel, zoomLevel);
+    const playerForCam = ships.find((s) => s.id === playerId);
+    if (minecraftMode && playerForCam && !playerForCam.isGhost) {
+        ctx.rotate(-playerForCam.angle - Math.PI / 2);
+    }
     ctx.translate(-vw / 2, -vh / 2);
-    const halfVisW = vw / 2 / zoomLevel;
-    const halfVisH = vh / 2 / zoomLevel;
+    
+    let halfVisW = vw / 2 / zoomLevel;
+    let halfVisH = vh / 2 / zoomLevel;
+    if (minecraftMode && playerForCam && !playerForCam.isGhost) {
+        const maxVis = Math.max(vw, vh) / zoomLevel;
+        halfVisW = maxVis;
+        halfVisH = maxVis;
+    }
     const vLeft = vw / 2 - halfVisW;
     const vRight = vw / 2 + halfVisW;
     const vTop = vh / 2 - halfVisH;
@@ -4572,13 +4657,22 @@ function drawShip(ctx, s, sx, sy) {
     ctx.rotate(-s.angle);
     ctx.translate(-sx, -sy);
 
+    ctx.save();
+    ctx.translate(sx, sy);
+    if (minecraftMode) {
+        const playerForCam = ships.find((ship) => ship.id === playerId);
+        if (playerForCam && !playerForCam.isGhost) {
+            ctx.rotate(playerForCam.angle + Math.PI / 2);
+        }
+    }
+
     // HPバー
     if (!s.isGhost) {
         ctx.shadowBlur = 0;
         ctx.globalAlpha = 0.8;
         const hpw = 34,
-            hpx = sx - hpw / 2,
-            hpy = sy - 30;
+            hpx = -hpw / 2,
+            hpy = -40;
         ctx.fillStyle = "rgba(0,0,0,0.8)";
         ctx.fillRect(hpx - 1, hpy - 1, hpw + 2, 5);
         ctx.fillStyle = "#222";
@@ -4591,7 +4685,7 @@ function drawShip(ctx, s, sx, sy) {
     if (s.isGhost && s.id === playerId) {
         ctx.fillStyle = "#aaa";
         ctx.font = "bold 11px ui-monospace, monospace";
-        ctx.fillText("SPECTATING", sx - 35, sy - 20);
+        ctx.fillText("SPECTATING", -35, -20);
     }
 
     // プレイヤー名の表示 (マルチプレイ時)
@@ -4616,11 +4710,12 @@ function drawShip(ctx, s, sx, sy) {
         ctx.textAlign = "center";
         ctx.shadowColor = "#000";
         ctx.shadowBlur = 4;
-        ctx.fillText(name, sx, sy - 38);
+        ctx.fillText(name, 0, -48);
         ctx.shadowBlur = 0;
         ctx.textAlign = "start";
     }
 
+    ctx.restore();
     ctx.restore();
 }
 
@@ -5119,6 +5214,16 @@ const sfxVolumeSlider = document.getElementById("sfxVolume");
 const damageTextSizeSlider = document.getElementById("damageTextSizeSlider");
 const toggleBoostSoundElem = document.getElementById("toggleBoostSound");
 const toggleWarpBassElem = document.getElementById("toggleWarpBass");
+const toggleMinecraftModeElem = document.getElementById("toggleMinecraftMode");
+
+const minecraftSensitivitySlider = document.getElementById("minecraftSensitivitySlider");
+if (minecraftSensitivitySlider) {
+    minecraftSensitivitySlider.value = minecraftSensitivity.toString();
+    minecraftSensitivitySlider.addEventListener("input", (e) => {
+        minecraftSensitivity = parseFloat(e.target.value);
+        localStorage.setItem("minecraftSensitivity_v1", minecraftSensitivity.toString());
+    });
+}
 
 const btnOpenSettingsView = document.getElementById("btnOpenSettingsView");
 const pauseMainView = document.getElementById("pauseMainView");
@@ -5140,6 +5245,11 @@ settingsTabs.forEach(tab => {
 function populateSettingsUI() {
     setLightweightUI(lightweightMode);
     setToggleElem(toggleControlModeElem, controlMode === "mouse");
+    setToggleElem(toggleMinecraftModeElem, minecraftMode);
+    if (minecraftSensitivitySlider) {
+        minecraftSensitivitySlider.disabled = !minecraftMode;
+        minecraftSensitivitySlider.style.opacity = minecraftMode ? "1" : "0.3";
+    }
     setToggleElem(toggleTouchUIElem, useTouchUI);
     setToggleElem(toggleFullscreenElem, !!document.fullscreenElement);
     setToggleElem(toggleStarsElem, showStars);
@@ -5480,6 +5590,25 @@ toggleControlModeElem?.addEventListener("keydown", (e) => {
     }
 });
 
+toggleMinecraftModeElem?.addEventListener("click", () => {
+    minecraftMode = !minecraftMode;
+    localStorage.setItem("minecraftMode_v1", minecraftMode ? "1" : "0");
+    setToggleElem(toggleMinecraftModeElem, minecraftMode);
+    if (minecraftSensitivitySlider) {
+        minecraftSensitivitySlider.disabled = !minecraftMode;
+        minecraftSensitivitySlider.style.opacity = minecraftMode ? "1" : "0.3";
+    }
+    if (!minecraftMode && !isMobileDevice && document.pointerLockElement === canvas) {
+        document.exitPointerLock();
+    }
+});
+toggleMinecraftModeElem?.addEventListener("keydown", (e) => {
+    if (e.key === " " || e.key === "Enter") {
+        e.preventDefault();
+        toggleMinecraftModeElem.click();
+    }
+});
+
 toggleTouchUIElem?.addEventListener("click", () => {
     useTouchUI = !useTouchUI;
     localStorage.setItem("forceTouchUI_v1", useTouchUI ? "1" : "0");
@@ -5752,6 +5881,9 @@ document.getElementById("btnLeaveRoom")?.addEventListener("click", () => {
 });
 
 document.getElementById("btnStartGame")?.addEventListener("click", () => {
+    if (minecraftMode && controlMode === "mouse" && !isMobileDevice) {
+        try { canvas.requestPointerLock(); } catch(e) {}
+    }
     if (photonClient && photonClient.isJoinedToRoom()) {
         photonClient.raiseEvent(4, window.currentRoomSettings, {
             receivers: Photon.LoadBalancing.Constants.ReceiverGroup.All,
@@ -5765,6 +5897,9 @@ document.getElementById("btnStartGame")?.addEventListener("click", () => {
 
 // 難易度ボタンイベント
 function startWithDifficulty(diff) {
+    if (minecraftMode && controlMode === "mouse" && !isMobileDevice) {
+        try { canvas.requestPointerLock(); } catch(e) {}
+    }
     window.currentDifficulty = diff;
     document.getElementById("difficultyModal").style.display = "none";
     startSinglePlayerCountdown();
@@ -6108,8 +6243,19 @@ if (isMobileDevice) {
         const STAR_COUNT = 200;
 
         function resizeStarCanvas() {
+            const oldW = starCanvas.width || 1;
+            const oldH = starCanvas.height || 1;
             starCanvas.width = window.innerWidth;
             starCanvas.height = window.innerHeight;
+            // Rescale existing star positions so they don't stretch on orientation changes
+            if (stars.length > 0) {
+                const scaleX = starCanvas.width / oldW;
+                const scaleY = starCanvas.height / oldH;
+                for (const s of stars) {
+                    s.x *= scaleX;
+                    s.y *= scaleY;
+                }
+            }
         }
         resizeStarCanvas();
         window.addEventListener("resize", resizeStarCanvas);

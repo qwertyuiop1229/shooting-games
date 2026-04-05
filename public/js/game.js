@@ -970,6 +970,7 @@ const DEFAULT_FEATURES = {
     showDamage: true,
     enableShake: true,
     shakeIntensity: 1.0,
+    aimLine: false,
 };
 function loadFeatureSettings() {
     try {
@@ -1199,7 +1200,7 @@ let keys = {};
 let mouse = { x: 0, y: 0, movementX: 0, movementY: 0, down: false };
 let bindingAction = null;
 
-const GAME_VERSION = "1.0.82";
+const GAME_VERSION = "1.0.89";
 let running = false,
     showHelp = false;
 let isPaused = false;
@@ -1410,6 +1411,8 @@ function updateTouchUIVisibility() {
         }
         if (tcm) tcm.style.opacity = "1";
     }
+    // minecraftMode時はtouchPanAreaを無効化（ジョイスティックにカメラ統合）
+    if (typeof updateTouchPanVisibility === "function") updateTouchPanVisibility();
 }
 updateTouchUIVisibility();
 
@@ -1483,14 +1486,25 @@ joystickArea.addEventListener(
                 joystickVector.x = dx / maxRadius;
                 joystickVector.y = dy / maxRadius;
 
-                // Map joystick coordinates to precise keys/angles
-                keys["touch_aim"] = true;
-                keys["touch_angle"] = Math.atan2(
-                    joystickVector.y,
-                    joystickVector.x,
-                );
-                keys["touch_thrust"] =
-                    Math.hypot(joystickVector.x, joystickVector.y) > 0.4;
+                if (minecraftMode) {
+                    // ポインターロックカメラモード:
+                    // 水平軸 = カメラ回転（独立） → joystickVector.xをフレームループで参照
+                    // 垂直軸 = 前進/ブレーキ（独立）
+                    // 斜め入力で両方同時に効く
+                    keys["touch_aim"] = true;
+                    keys["touch_thrust"] = joystickVector.y < -0.25;
+                    keys["touch_brake"] = joystickVector.y > 0.4;
+                } else {
+                    // 通常モード: ジョイスティックの角度 = エイム方向
+                    keys["touch_aim"] = true;
+                    keys["touch_angle"] = Math.atan2(
+                        joystickVector.y,
+                        joystickVector.x,
+                    );
+                    keys["touch_thrust"] =
+                        Math.hypot(joystickVector.x, joystickVector.y) > 0.4;
+                    keys["touch_brake"] = false;
+                }
 
                 break;
             }
@@ -1509,6 +1523,7 @@ function endJoystick(e) {
             joystickVector = { x: 0, y: 0 };
             keys["touch_aim"] = false;
             keys["touch_thrust"] = false;
+            keys["touch_brake"] = false;
             break;
         }
     }
@@ -1520,6 +1535,22 @@ const touchPanArea = document.getElementById("touchPanArea");
 let touchPanActive = false;
 let touchPanId = null;
 let lastTouchPanX = 0;
+
+// touchPanAreaの表示/非表示を制御
+// minecraftMode時はジョイスティックにカメラ統合されるため不要
+function updateTouchPanVisibility() {
+    const el = document.getElementById("touchPanArea");
+    if (!el) return;
+    if (minecraftMode && controlMode === "touch") {
+        el.style.pointerEvents = "none";
+        el.style.display = "none";
+    } else {
+        el.style.pointerEvents = "auto";
+        el.style.display = "";
+    }
+}
+updateTouchPanVisibility();
+
 touchPanArea?.addEventListener("touchstart", (e) => {
     e.preventDefault();
     if (touchPanActive) return;
@@ -1930,6 +1961,54 @@ if (spawnMapCanvas) {
     };
     spawnMapCanvas.addEventListener("mouseup", endDrag);
     spawnMapCanvas.addEventListener("mouseleave", endDrag);
+
+    // タッチ対応（スマホでスポーン位置をドラッグ変更可能に）
+    spawnMapCanvas.addEventListener("touchstart", (e) => {
+        if (!isRoomHost() || !photonClient || !photonClient.isJoinedToRoom()) return;
+        e.preventDefault();
+        const touch = e.changedTouches[0];
+        const rect = spawnMapCanvas.getBoundingClientRect();
+        const x = touch.clientX - rect.left;
+        const y = touch.clientY - rect.top;
+
+        let bestDist = 30;
+        let bestActor = null;
+        const actors = photonClient.myRoomActors();
+        for (let id in actors) {
+            const act = actors[id];
+            let px = act.getCustomProperty("spawnX") || WORLD_W / 2;
+            let py = act.getCustomProperty("spawnY") || WORLD_H / 2;
+            if (window.currentRoomSettings.spawns && window.currentRoomSettings.spawns[id]) {
+                px = window.currentRoomSettings.spawns[id].x;
+                py = window.currentRoomSettings.spawns[id].y;
+            }
+            const cx = (px / WORLD_W) * rect.width;
+            const cy = (py / WORLD_H) * rect.height;
+            const dist = Math.hypot(cx - x, cy - y);
+            if (dist < bestDist) {
+                bestDist = dist;
+                bestActor = id;
+            }
+        }
+        if (bestActor) draggedActorNr = bestActor;
+    }, { passive: false });
+
+    spawnMapCanvas.addEventListener("touchmove", (e) => {
+        if (!draggedActorNr || !isRoomHost() || !photonClient) return;
+        e.preventDefault();
+        const touch = e.changedTouches[0];
+        const rect = spawnMapCanvas.getBoundingClientRect();
+        const x = touch.clientX - rect.left;
+        const y = touch.clientY - rect.top;
+        const worldX = Math.max(0, Math.min(WORLD_W, (x / rect.width) * WORLD_W));
+        const worldY = Math.max(0, Math.min(WORLD_H, (y / rect.height) * WORLD_H));
+        if (!window.currentRoomSettings.spawns) window.currentRoomSettings.spawns = {};
+        window.currentRoomSettings.spawns[draggedActorNr] = { x: worldX, y: worldY };
+        drawSpawnMap();
+    }, { passive: false });
+
+    spawnMapCanvas.addEventListener("touchend", endDrag);
+    spawnMapCanvas.addEventListener("touchcancel", endDrag);
 }
 
 window.selectTeam = function (teamId) {
@@ -3267,7 +3346,7 @@ function update(dt) {
                 controlMode === "keyboard" &&
                 isAnyPressedForBind(keyBindings.turnRight);
             let thrustKey = isAnyPressedForBind(keyBindings.thrust);
-            const brakeKey = isAnyPressedForBind(keyBindings.brake);
+            let brakeKey = isAnyPressedForBind(keyBindings.brake);
             const shootKey =
                 !isGhostPlayer &&
                 (isAnyPressedForBind(keyBindings.shoot) ||
@@ -3283,10 +3362,17 @@ function update(dt) {
             // Touch aim override
             if (minecraftMode) {
                 const sensitivity = 0.003 * (minecraftSensitivity / 5);
+                // PC: mouse.movementXからカメラ回転
                 player.angle += mouse.movementX * sensitivity;
                 mouse.movementX = 0;
                 mouse.movementY = 0;
-                if (controlMode === "touch" && keys["touch_thrust"]) thrustKey = true;
+                if (controlMode === "touch") {
+                    // モバイル: ジョイスティック水平軸から毎フレームカメラ回転
+                    const touchCamSpeed = 0.04 * (minecraftSensitivity / 5);
+                    player.angle += joystickVector.x * touchCamSpeed;
+                    if (keys["touch_thrust"]) thrustKey = true;
+                    if (keys["touch_brake"]) brakeKey = true;
+                }
             } else if (controlMode === "touch" && keys["touch_aim"]) {
                 player.angle = angleLerp(player.angle, keys["touch_angle"], 0.28);
                 if (keys["touch_thrust"]) thrustKey = true;
@@ -3396,6 +3482,10 @@ function update(dt) {
                 player.angle += mouse.movementX * sensitivity;
                 mouse.movementX = 0;
                 mouse.movementY = 0;
+                if (controlMode === "touch") {
+                    const touchCamSpeed = 0.04 * (minecraftSensitivity / 5);
+                    player.angle += joystickVector.x * touchCamSpeed;
+                }
             } else if (controlMode === "touch" && keys["touch_aim"]) {
                 player.angle = angleLerp(player.angle, keys["touch_angle"], 0.28);
             } else if (controlMode === "mouse") {
@@ -3410,11 +3500,11 @@ function update(dt) {
             if (turnRight) player.angle += player.turnSpeed;
             const ca = Math.cos(player.angle),
                 sa = Math.sin(player.angle);
-            if (isAnyPressedForBind(keyBindings.thrust)) {
+            if (isAnyPressedForBind(keyBindings.thrust) || (controlMode === "touch" && keys["touch_thrust"])) {
                 player.vx += ca * player.thrust * 2;
                 player.vy += sa * player.thrust * 2;
             }
-            if (isAnyPressedForBind(keyBindings.brake)) {
+            if (isAnyPressedForBind(keyBindings.brake) || (controlMode === "touch" && keys["touch_brake"])) {
                 player.vx *= 1 - player.drag * 10;
                 player.vy *= 1 - player.drag * 10;
             }
@@ -4189,11 +4279,11 @@ function update(dt) {
 }
 
 /* ========== 描画ルーチン ========== */
-let starCaches = [];
-let starCacheNeedsRegen = true;
-let lastStarVW = 0,
+var starCaches = [];
+var starCacheNeedsRegen = true;
+var lastStarVW = 0,
     lastStarVH = 0;
-let GameFrames = 0;
+var GameFrames = 0;
 function regenStarCaches(vw, vh) {
     starCaches = [];
     lastStarVW = vw;
@@ -4472,6 +4562,28 @@ function render() {
         )
             continue;
         drawShip(ctx, s, sc.sx, sc.sy);
+        
+        // Draw Aim Line
+        if (s.id === playerId && featureSettings.aimLine && !s.isGhost && !gameOverMode) {
+            ctx.save();
+            // Faint gray solid line with no glow
+            ctx.globalAlpha = 0.15;
+            ctx.strokeStyle = "rgba(220, 220, 220, 1.0)";
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            
+            // Start from slightly ahead of the ship body (offset arbitrarily instead of undefined s.size)
+            const off = 25; 
+            const startX = sc.sx + Math.cos(s.angle) * off;
+            const startY = sc.sy + Math.sin(s.angle) * off;
+            const endX = startX + Math.cos(s.angle) * 2000;
+            const endY = startY + Math.sin(s.angle) * 2000;
+            
+            ctx.moveTo(startX, startY);
+            ctx.lineTo(endX, endY);
+            ctx.stroke();
+            ctx.restore();
+        }
     }
 
     for (const ft of floatingTexts) {
@@ -4791,19 +4903,6 @@ function drawUI(ctx, vLeft, vRight, vTop, vBottom) {
     if (isPaused) {
         ctx.fillStyle = "rgba(0, 5, 10, 0.6)";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        const isAnyModalOpen = Array.from(
-            document.querySelectorAll(".game-modal"),
-        ).some((m) => m.style.display === "block");
-        if (!isAnyModalOpen) {
-            const txt = "PAUSED";
-            ctx.font = "bold 36px ui-monospace, monospace";
-            const m = ctx.measureText(txt);
-            ctx.fillStyle = "#00f0ff";
-            ctx.shadowColor = "#00f0ff";
-            ctx.shadowBlur = 10;
-            ctx.fillText(txt, vw / 2 - m.width / 2, vh / 2);
-            ctx.shadowBlur = 0;
-        }
     }
 
     ctx.restore();
@@ -4866,7 +4965,10 @@ function drawUI(ctx, vLeft, vRight, vTop, vBottom) {
             sy <= vBottom
         )
             continue;
-        const ang = Math.atan2(d.dy, d.dx);
+        let ang = Math.atan2(d.dy, d.dx);
+        if (minecraftMode && cam && !cam.isGhost) {
+            ang -= (cam.angle + Math.PI / 2);
+        }
         const c = Math.cos(ang),
             s = Math.sin(ang);
         const eps = 1e-6;
@@ -4916,7 +5018,10 @@ function drawUI(ctx, vLeft, vRight, vTop, vBottom) {
             sy <= vBottom
         )
             continue;
-        const ang = Math.atan2(d.dy, d.dx);
+        let ang = Math.atan2(d.dy, d.dx);
+        if (minecraftMode && cam && !cam.isGhost) {
+            ang -= (cam.angle + Math.PI / 2);
+        }
         const c = Math.cos(ang),
             s = Math.sin(ang);
         const eps = 1e-6;
@@ -4972,13 +5077,20 @@ function drawUI(ctx, vLeft, vRight, vTop, vBottom) {
     if (showMinimap) {
         const mapW = 140,
             mapH = 140;
-        const mX = 12 + safeAreaMarginX;
-        const mY = vh - mapH - 12 - safeAreaMarginY;
+        const mX = 32 + safeAreaMarginX;
+        const mY = vh - mapH - 32 - safeAreaMarginY;
         const mapLayout = getCanvasLayout('hud_minimap', mX, mY);
 
         ctx.save();
         ctx.translate(mapLayout.x, mapLayout.y);
         ctx.scale(mapLayout.s, mapLayout.s);
+
+        const p = ships.find((s) => s.id === playerId);
+        if (minecraftMode && p && !p.isGhost) {
+            ctx.translate(mapW / 2, mapH / 2);
+            ctx.rotate(-p.angle - Math.PI / 2);
+            ctx.translate(-mapW / 2, -mapH / 2);
+        }
 
         ctx.globalAlpha = 0.95;
         ctx.fillStyle = "rgba(0,10,20,0.7)";
@@ -5199,6 +5311,7 @@ const lightweightToggle = document.getElementById("lightweightToggle");
 const changeNicknameBtn = document.getElementById("changeNicknameBtn");
 const toggleAllElem = document.getElementById("toggleAll");
 const toggleStarsElem = document.getElementById("toggleStars");
+const toggleAimLineElem = document.getElementById("toggleAimLine");
 const toggleMinimapElem = document.getElementById("toggleMinimap");
 const toggleParticlesElem = document.getElementById("toggleParticles");
 const toggleGlowElem = document.getElementById("toggleGlow");
@@ -5253,6 +5366,7 @@ function populateSettingsUI() {
     setToggleElem(toggleTouchUIElem, useTouchUI);
     setToggleElem(toggleFullscreenElem, !!document.fullscreenElement);
     setToggleElem(toggleStarsElem, showStars);
+    setToggleElem(toggleAimLineElem, !!featureSettings.aimLine);
     setToggleElem(toggleMinimapElem, showMinimap);
     setToggleElem(toggleParticlesElem, showParticles);
     setToggleElem(toggleGlowElem, showGlow);
@@ -5517,6 +5631,16 @@ wireToggle(
     },
 );
 wireToggle(
+    toggleAimLineElem,
+    () => featureSettings.aimLine,
+    (v) => {
+        featureSettings.aimLine = v;
+        applyFeatureSettingsToRuntime();
+        setToggleElem(toggleAimLineElem, v);
+        saveFeatureSettings(featureSettings);
+    },
+);
+wireToggle(
     toggleMinimapElem,
     () => featureSettings.minimap,
     (v) => {
@@ -5601,6 +5725,7 @@ toggleMinecraftModeElem?.addEventListener("click", () => {
     if (!minecraftMode && !isMobileDevice && document.pointerLockElement === canvas) {
         document.exitPointerLock();
     }
+    updateTouchPanVisibility();
 });
 toggleMinecraftModeElem?.addEventListener("keydown", (e) => {
     if (e.key === " " || e.key === "Enter") {
@@ -5658,6 +5783,8 @@ wireToggle(
         featureSettings.enableShake = v;
         applyFeatureSettingsToRuntime();
         setToggleElem(toggleStarsElem, v);
+        featureSettings.aimLine = v;
+        setToggleElem(toggleAimLineElem, v);
         setToggleElem(toggleMinimapElem, v);
         setToggleElem(toggleParticlesElem, v);
         setToggleElem(toggleGlowElem, v);
@@ -6361,6 +6488,8 @@ function setupLayoutEditor() {
     const btnResetItem = document.getElementById('leBtnResetItem');
     const btnResetAll = document.getElementById('leBtnResetAll');
     const selName = document.getElementById('leSelectedName');
+    const sizePopup = document.getElementById('leSizePopup');
+    const btnClosePopup = document.getElementById('leBtnClosePopup');
 
     if (!btnOpen || !overlay) return;
 
@@ -6385,6 +6514,7 @@ function setupLayoutEditor() {
         isPaused = true;
         overlay.style.display = 'block';
         overlay.style.opacity = '0';
+        if (sizePopup) sizePopup.style.display = 'none';
         requestAnimationFrame(() => {
             overlay.style.transition = 'opacity 0.25s ease';
             overlay.style.opacity = '1';
@@ -6401,15 +6531,38 @@ function setupLayoutEditor() {
         initCanvas();
     });
 
+    function closePopup() {
+        if (!sizePopup || sizePopup.style.display === 'none') return;
+        sizePopup.style.opacity = '0';
+        sizePopup.style.transform = 'scale(0.9)';
+        setTimeout(() => {
+            if (sizePopup.style.opacity === '0') sizePopup.style.display = 'none';
+        }, 200);
+    }
+
+    if (overlay) {
+        overlay.addEventListener('pointerdown', (e) => {
+            if (sizePopup && sizePopup.style.display !== 'none' && !sizePopup.contains(e.target)) {
+                closePopup();
+            }
+        });
+    }
+
     btnClose.addEventListener('click', () => {
         playClickSound();
         overlay.style.transition = 'opacity 0.2s ease';
         overlay.style.opacity = '0';
+        if (sizePopup) sizePopup.style.display = 'none';
         setTimeout(() => {
             overlay.style.display = 'none';
             overlay.style.transition = '';
             const guide = document.getElementById('leSafeAreaGuide');
             if (guide) guide.style.display = 'none';
+            // Return to settings menu
+            const settingsMenu = document.getElementById('pauseSettingsMenu');
+            if (settingsMenu) {
+                settingsMenu.style.display = 'block';
+            }
         }, 200);
         UILayoutManager.save();
         UILayoutManager.applyToDOM();
@@ -6420,17 +6573,22 @@ function setupLayoutEditor() {
         selectedBox = box;
         if (box) {
             box.style.borderColor = '#0f0';
-            selName.innerText = '★ 対象: ' + box.dataset.label;
+            selName.innerText = '★ ' + box.dataset.label + ' (長押し/右クリックでサイズ変更)';
             const s = UILayoutManager.get(box.dataset.id)?.s || 1.0;
             scaleSlider.value = s;
-            scaleSlider.disabled = false;
             scaleVal.innerText = s.toFixed(1) + 'x';
             btnResetItem.disabled = false;
         } else {
-            selName.innerText = '★ 対象: 未選択';
-            scaleSlider.disabled = true;
+            selName.innerText = '★ 未選択';
             btnResetItem.disabled = true;
+            if (sizePopup) sizePopup.style.display = 'none';
         }
+    }
+
+    if (btnClosePopup) {
+        btnClosePopup.addEventListener('click', () => {
+            sizePopup.style.display = 'none';
+        });
     }
 
     scaleSlider.addEventListener('input', (e) => {
@@ -6503,7 +6661,7 @@ function setupLayoutEditor() {
                     box.style.height = def.h + 'px';
                     if (def.baseAnchor === 'tl') { xPct = (20 + def.w / 2) / window.innerWidth * 100; yPct = (36 + def.h / 2) / window.innerHeight * 100; }
                     if (def.baseAnchor === 'tr') { xPct = (window.innerWidth - 180 + def.w / 2) / window.innerWidth * 100; yPct = (36 + def.h / 2) / window.innerHeight * 100; }
-                    if (def.baseAnchor === 'bl') { xPct = (12 + def.w / 2) / window.innerWidth * 100; yPct = (window.innerHeight - 152 + def.h / 2) / window.innerHeight * 100; }
+                    if (def.baseAnchor === 'bl') { xPct = (32 + def.w / 2) / window.innerWidth * 100; yPct = (window.innerHeight - 172 + def.h / 2) / window.innerHeight * 100; }
                     if (def.baseAnchor === 'br') { xPct = (window.innerWidth - 86 + def.w / 2) / window.innerWidth * 100; yPct = (window.innerHeight - 34 + def.h / 2) / window.innerHeight * 100; }
                 }
             } else {
@@ -6526,10 +6684,55 @@ function setupLayoutEditor() {
 
             let isDragging = false;
             let offsetX, offsetY;
+            let longPressTimer = null;
+
+            function showPopup(e, x, y) {
+                if (!sizePopup || !box) return;
+                selectBox(box);
+                
+                sizePopup.style.transition = 'none';
+                sizePopup.style.opacity = '0';
+                sizePopup.style.transform = 'scale(0.9)';
+                sizePopup.style.display = 'flex';
+                
+                // Clamp position
+                let px = x;
+                let py = y + 20;
+                
+                // Need a frame to get offsetWidth correctly
+                requestAnimationFrame(() => {
+                    if (px + sizePopup.offsetWidth > window.innerWidth) px = window.innerWidth - sizePopup.offsetWidth - 10;
+                    if (py + sizePopup.offsetHeight > window.innerHeight) py = y - sizePopup.offsetHeight - 10;
+                    px = Math.max(10, px);
+                    py = Math.max(10, py);
+                    sizePopup.style.left = px + 'px';
+                    sizePopup.style.top = py + 'px';
+                    
+                    requestAnimationFrame(() => {
+                        sizePopup.style.transition = 'opacity 0.2s ease, transform 0.2s cubic-bezier(0.18, 0.89, 0.32, 1.28)';
+                        sizePopup.style.opacity = '1';
+                        sizePopup.style.transform = 'scale(1)';
+                    });
+                });
+            }
+
+            box.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                showPopup(e, e.clientX, e.clientY);
+            });
 
             function onPointerDown(e) {
+                // Ignore right click for drag
+                if (e.button === 2) return;
+                
                 e.preventDefault();
                 e.stopPropagation();
+                
+                // Close popup initially to reset
+                if (sizePopup && sizePopup.style.display !== 'none' && !sizePopup.contains(e.target)) {
+                    closePopup();
+                }
+
                 isDragging = true;
                 selectBox(box);
                 const rect = box.getBoundingClientRect();
@@ -6537,18 +6740,39 @@ function setupLayoutEditor() {
                 offsetY = e.clientY - rect.top - rect.height / 2;
                 box.setPointerCapture(e.pointerId);
                 box.style.cursor = 'grabbing';
+                
+                // Long press logic for mobile
+                if (e.pointerType === 'touch') {
+                    longPressTimer = setTimeout(() => {
+                        if (isDragging) {
+                            showPopup(e, e.clientX, e.clientY);
+                            isDragging = false;
+                            box.releasePointerCapture(e.pointerId);
+                            box.style.cursor = 'grab';
+                        }
+                    }, 500); // 500ms long press
+                }
             }
             function onPointerMove(e) {
                 if (!isDragging) return;
                 e.preventDefault();
+                
+                // Drag start - close popup
+                if (sizePopup && sizePopup.style.display !== 'none') closePopup();
+                
+                // If moved too much, cancel long press
+                if (longPressTimer && (Math.abs(e.movementX) > 3 || Math.abs(e.movementY) > 3)) {
+                    clearTimeout(longPressTimer);
+                    longPressTimer = null;
+                }
+                
                 let nx = e.clientX - offsetX;
                 let ny = e.clientY - offsetY;
                 let pctX = nx / window.innerWidth * 100;
                 let pctY = ny / window.innerHeight * 100;
-                const panelH = 130;
-                const maxYpct = (window.innerHeight - panelH) / window.innerHeight * 100;
+
                 pctX = Math.max(2, Math.min(98, pctX));
-                pctY = Math.max(2, Math.min(maxYpct, pctY));
+                pctY = Math.max(2, Math.min(98, pctY));
 
                 box.dataset.x = pctX;
                 box.dataset.y = pctY;
@@ -6558,6 +6782,10 @@ function setupLayoutEditor() {
                 UILayoutManager.set(def.id, pctX, pctY, curS);
             }
             function onPointerUp(e) {
+                if (longPressTimer) {
+                    clearTimeout(longPressTimer);
+                    longPressTimer = null;
+                }
                 if (!isDragging) return;
                 isDragging = false;
                 box.releasePointerCapture(e.pointerId);

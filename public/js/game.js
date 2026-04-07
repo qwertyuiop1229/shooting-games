@@ -1206,7 +1206,7 @@ let keys = {};
 let mouse = { x: 0, y: 0, movementX: 0, movementY: 0, down: false };
 let bindingAction = null;
 
-const GAME_VERSION = "1.3.0";
+const GAME_VERSION = "1.3.3";
 let running = false,
     showHelp = false;
 let isPaused = false;
@@ -1707,7 +1707,7 @@ window.leaveMultiplayerRoom = function (showAlert = false, msg = "") {
     isLeavingRoom = true;
     if (showAlert) {
         hasDisconnectedAlertShown = true;
-        alert(msg);
+        window.gameAlert(msg, "DISCONNECTED");
     }
 
     // フェードアウトの待機(1.2秒)を消し、即座にPhoton切断とFirestore削除を行う
@@ -2152,7 +2152,7 @@ document
 
 window.connectToPhoton = function (roomId, isHost) {
     if (typeof Photon === "undefined") {
-        alert("Photon SDK not loaded.");
+        window.gameAlert("Photon SDK not loaded.", "ERROR");
         return;
     }
     updatePhotonStatus("通信を確立中...");
@@ -2227,8 +2227,8 @@ window.connectToPhoton = function (roomId, isHost) {
     photonClient.onJoinRoomFailed = function (errorCode, errorMsg) {
         console.warn("Join Room Failed:", errorCode, errorMsg);
         updatePhotonStatus("入室に失敗しました");
-        alert(
-            "ルームの入室に失敗しました。\n既に解散されたか、存在しない可能性があります。",
+        window.gameAlert(
+            "ルームの入室に失敗しました。\n既に解散されたか、存在しない可能性があります。", "ROOM ERROR"
         );
 
         // 入室に失敗した＝無効なルームがFirestoreに残っているため、掃除する
@@ -2241,7 +2241,7 @@ window.connectToPhoton = function (roomId, isHost) {
     photonClient.onCreateRoomFailed = function (errorCode, errorMsg) {
         console.warn("Create Room Failed:", errorCode, errorMsg);
         updatePhotonStatus("ルーム作成に失敗しました");
-        alert("ルームの作成に失敗しました。");
+        window.gameAlert("ルームの作成に失敗しました。", "ROOM ERROR");
 
         if (window.currentRoomDocId && window.deleteFirestoreRoom) {
             window.deleteFirestoreRoom(window.currentRoomDocId);
@@ -2273,7 +2273,7 @@ window.connectToPhoton = function (roomId, isHost) {
             }
 
             if (matchEnded) {
-                alert("ホストの接続が切断されました。");
+                window.gameAlert("ホストの接続が切断されました。", "DISCONNECTED");
             } else {
                 window.leaveMultiplayerRoom(
                     true,
@@ -5904,16 +5904,36 @@ function checkAndSetNickname() {
         document.getElementById("modeSelectModal").style.display = "block";
     }
 }
-saveNicknameBtn?.addEventListener("click", () => {
+saveNicknameBtn?.addEventListener("click", async () => {
     const name = nicknameInput.value.trim();
     if (name && name.length > 0) {
+        saveNicknameBtn.disabled = true;
+        saveNicknameBtn.innerText = "確認中...";
+        try {
+            const currentUid = window.firebaseAuth && window.firebaseAuth.currentUser ? window.firebaseAuth.currentUser.uid : null;
+            if (window.checkNicknameUnique) {
+                const unique = await window.checkNicknameUnique(name, currentUid);
+                if (!unique) {
+                    window.gameAlert("このコールサインは既に使用されています。\n別の名前を入力してください。", "NAME ERROR");
+                    saveNicknameBtn.disabled = false;
+                    saveNicknameBtn.innerText = "システム起動";
+                    return;
+                }
+            }
+        } catch(e) {
+            console.error(e);
+        }
+        
+        saveNicknameBtn.disabled = false;
+        saveNicknameBtn.innerText = "システム起動";
+
         localStorage.setItem("playerNickname_v1", name);
         nicknameModal.style.display = "none";
         if (!gameOverMode) {
             document.getElementById("modeSelectModal").style.display = "block";
         }
     } else {
-        alert("コールサインを入力してください");
+        window.gameAlert("コールサインを入力してください。", "INPUT ERROR");
     }
 });
 nicknameInput?.addEventListener("keydown", (e) => {
@@ -5980,6 +6000,12 @@ document
 document
     .getElementById("btnMultiPlayer")
     ?.addEventListener("click", () => {
+        if (window.firebaseAuth && window.firebaseAuth.currentUser && window.firebaseAuth.currentUser.isAnonymous) {
+            window.gameAlert("マルチプレイを遊ぶにはアカウント登録（データバックアップ）が必要です。", "ACCOUNT REQUIRED").then(() => {
+                if (window.openAuthModal) window.openAuthModal();
+            });
+            return;
+        }
         document.getElementById("modeSelectModal").style.display = "none";
         document.getElementById("lobbyModal").style.display = "block";
         if (window.subscribeRooms) window.subscribeRooms();
@@ -6612,8 +6638,8 @@ function setupLayoutEditor() {
         initCanvas();
     });
 
-    btnResetAll.addEventListener('click', () => {
-        if (confirm('全てのUI配置をリセットしますか？')) {
+    btnResetAll.addEventListener('click', async () => {
+        if (await window.gameConfirm('全てのUI配置をリセットしますか？')) {
             UILayoutManager.resetAll();
             initCanvas();
         }
@@ -6809,3 +6835,330 @@ function setupLayoutEditor() {
 }
 setupLayoutEditor();
 UILayoutManager.applyToDOM();
+
+/* ========== カスタム gameAlert / gameConfirm ========== */
+(function() {
+    const overlay = document.getElementById('gameAlertOverlay');
+    const box = document.getElementById('gameAlertBox');
+    const titleEl = document.getElementById('gameAlertTitle');
+    const msgEl = document.getElementById('gameAlertMessage');
+    const okBtn = document.getElementById('gameAlertOkBtn');
+    const cancelBtn = document.getElementById('gameAlertCancelBtn');
+    let _resolve = null;
+
+    function closeAlert() {
+        box.style.setProperty('animation', 'alertBoxOut 0.15s ease-in forwards', 'important');
+        overlay.style.animation = 'alertOverlayOut 0.15s ease-in forwards';
+        setTimeout(() => {
+            overlay.classList.remove('active');
+            overlay.style.animation = '';
+            box.style.removeProperty('animation');
+        }, 160);
+    }
+
+    /**
+     * gameAlert(message, title?) - Promise<void>
+     */
+    window.gameAlert = function(message, title) {
+        return new Promise(resolve => {
+            _resolve = resolve;
+            titleEl.innerText = title || 'NOTICE';
+            msgEl.innerText = message;
+            cancelBtn.style.display = 'none';
+            okBtn.innerText = 'OK';
+            overlay.classList.add('active');
+            overlay.style.animation = 'alertOverlayIn 0.18s ease-out';
+            box.style.setProperty('animation', 'alertBoxIn 0.2s cubic-bezier(0.16,1,0.3,1)', 'important');
+            okBtn.focus();
+        });
+    };
+
+    /**
+     * gameConfirm(message, title?) - Promise<boolean>
+     */
+    window.gameConfirm = function(message, title) {
+        return new Promise(resolve => {
+            _resolve = resolve;
+            titleEl.innerText = title || 'CONFIRM';
+            msgEl.innerText = message;
+            cancelBtn.style.display = '';
+            okBtn.innerText = 'OK';
+            overlay.classList.add('active');
+            overlay.style.animation = 'alertOverlayIn 0.18s ease-out';
+            box.style.setProperty('animation', 'alertBoxIn 0.2s cubic-bezier(0.16,1,0.3,1)', 'important');
+            okBtn.focus();
+        });
+    };
+
+    okBtn.addEventListener('click', () => {
+        closeAlert();
+        if (_resolve) { const r = _resolve; _resolve = null; r(true); }
+    });
+    cancelBtn.addEventListener('click', () => {
+        closeAlert();
+        if (_resolve) { const r = _resolve; _resolve = null; r(false); }
+    });
+
+    // Escでキャンセル扱い
+    overlay.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') cancelBtn.click();
+    });
+})();
+
+/* ========== Firebase Auth / Account Linkage ========== */
+function initFirebaseAuthUI() {
+    if (!window.firebaseAuthUI || !window.firebaseAuth) {
+        setTimeout(initFirebaseAuthUI, 50);
+        return;
+    }
+    const { 
+        signInAnonymously, onAuthStateChanged, signInWithEmailAndPassword, 
+        signOut, linkWithCredential, EmailAuthProvider 
+    } = window.firebaseAuthUI;
+    const auth = window.firebaseAuth;
+    
+    let isGuest = true;
+
+    // Account Status Elements
+    const accountStatusText = document.getElementById("accountStatusText");
+    const btnOpenAuthFromSettings = document.getElementById("btnOpenAuthFromSettings");
+    const btnSignOutButton = document.getElementById("btnSignOutButton");
+    const btnStartLogin = document.getElementById("btnStartLogin");
+
+    // Auth Modal Elements
+    const authModal = document.getElementById("authModal");
+    const authEmailInput = document.getElementById("authEmailInput");
+    const authPasswordInput = document.getElementById("authPasswordInput");
+    const btnCancelAuth = document.getElementById("btnCancelAuth");
+    const btnSubmitAuth = document.getElementById("btnSubmitAuth");
+    const authErrorMsg = document.getElementById("authErrorMsg");
+
+    // Conflict Modal
+    const dataConflictModal = document.getElementById("dataConflictModal");
+    const btnConfirmConflict = document.getElementById("btnConfirmConflict");
+    const btnCancelConflict = document.getElementById("btnCancelConflict");
+    let selectedConflictChoice = null;
+
+    function updateAccountUI(user) {
+        if (!user) {
+            if (accountStatusText) {
+                accountStatusText.innerText = "OFFLINE";
+                accountStatusText.style.color = "#aaa";
+            }
+            if (btnOpenAuthFromSettings) btnOpenAuthFromSettings.style.display = "block";
+            if (btnSignOutButton) btnSignOutButton.style.display = "none";
+            if (btnStartLogin) {
+                btnStartLogin.innerText = "LOGIN";
+                btnStartLogin.classList.remove("logged-in");
+            }
+            return;
+        }
+        isGuest = user.isAnonymous;
+        if (isGuest) {
+            if (accountStatusText) {
+                accountStatusText.innerText = "GUEST (未連携)";
+                accountStatusText.style.color = "#0f0";
+                accountStatusText.style.textShadow = "0 0 10px #0f0";
+            }
+            if (btnOpenAuthFromSettings) btnOpenAuthFromSettings.style.display = "block";
+            if (btnSignOutButton) btnSignOutButton.style.display = "none";
+            if (btnStartLogin) {
+                btnStartLogin.innerText = "LOGIN";
+                btnStartLogin.classList.remove("logged-in");
+            }
+        } else {
+            if (accountStatusText) {
+                accountStatusText.innerText = `LINKED (${user.email})`;
+                accountStatusText.style.color = "#00f0ff";
+                accountStatusText.style.textShadow = "0 0 10px #00f0ff";
+            }
+            if (btnOpenAuthFromSettings) btnOpenAuthFromSettings.style.display = "none";
+            if (btnSignOutButton) btnSignOutButton.style.display = "block";
+            if (btnStartLogin) {
+                btnStartLogin.innerText = "LINKED ✓";
+                btnStartLogin.classList.add("logged-in");
+            }
+        }
+    }
+
+    onAuthStateChanged(auth, async (user) => {
+        if (user) {
+            updateAccountUI(user);
+        } else {
+            try {
+                await signInAnonymously(auth);
+            } catch(e) {
+                console.error("Anonymous login failed", e);
+            }
+        }
+    });
+
+    window.openAuthModal = function() {
+        authErrorMsg.innerText = "";
+        authEmailInput.value = "";
+        authPasswordInput.value = "";
+        // モードセレクトが開いていたら隠す
+        const msm = document.getElementById("modeSelectModal");
+        if (msm && msm.style.display !== "none") {
+            msm.dataset.wasOpen = "true";
+            msm.style.display = "none";
+        }
+        authModal.style.display = "block";
+    };
+
+    btnStartLogin?.addEventListener("click", (e) => {
+        e.stopPropagation(); // スタート画面のクリック伝播を防止
+        window.openAuthModal();
+    });
+    btnOpenAuthFromSettings?.addEventListener("click", () => {
+        window.openAuthModal();
+    });
+
+    btnSignOutButton?.addEventListener("click", async () => {
+        const yes = await window.gameConfirm("サインアウトしますか？\n現在のデータからはログアウトされます。");
+        if (yes) {
+            await signOut(auth);
+            await window.gameAlert("サインアウトしました。");
+            document.getElementById("pauseSettingsView").style.display = "none";
+            document.getElementById("pauseSettingsMenu").style.display = "none";
+            window.location.reload();
+        }
+    });
+
+    function hideAuthModal() {
+        authModal.style.display = "none";
+        // モードセレクトを元に戻す
+        const msm = document.getElementById("modeSelectModal");
+        if (msm && msm.dataset.wasOpen === "true") {
+            msm.style.display = "block";
+            delete msm.dataset.wasOpen;
+        }
+    }
+
+    btnCancelAuth.addEventListener("click", () => {
+        hideAuthModal();
+    });
+
+    btnSubmitAuth.addEventListener("click", async () => {
+        const email = authEmailInput.value.trim();
+        const pwd = authPasswordInput.value;
+        if (!email || pwd.length < 6) {
+            authErrorMsg.innerText = "有効なメールアドレスと6文字以上のパスワードを入力してください。";
+            return;
+        }
+        authErrorMsg.innerText = "処理中...";
+        authErrorMsg.style.color = "#aaa";
+        btnSubmitAuth.disabled = true;
+
+        let localData = null;
+        let oldUidForPushing = null;
+
+        try {
+            // ===== 統合フロー: まずリンク → 失敗したらログイン =====
+            if (auth.currentUser && auth.currentUser.isAnonymous) {
+                oldUidForPushing = auth.currentUser.uid;
+                localData = await window.getPersonalHighScoreAndData(oldUidForPushing, "normal");
+
+                // Step 1: まず匿名アカウントにリンクを試みる（＝新規登録）
+                try {
+                    const cred = EmailAuthProvider.credential(email, pwd);
+                    await linkWithCredential(auth.currentUser, cred);
+                    hideAuthModal();
+                    await window.gameAlert("アカウントを新規登録して連携しました！\nデータが安全にバックアップされています。", "LINKED");
+                    updateAccountUI(auth.currentUser);
+                    btnSubmitAuth.disabled = false;
+                    return;
+                } catch (linkErr) {
+                    if (linkErr.code !== 'auth/email-already-in-use') {
+                        throw linkErr; // 予期しないエラーは上位へ
+                    }
+                    // メール既存 → ログインフローへ
+                }
+            }
+
+            // Step 2: ログインフロー（既存アカウント）
+            const result = await signInWithEmailAndPassword(auth, email, pwd);
+            const newUid = result.user.uid;
+            let cloudData = await window.getPersonalHighScoreAndData(newUid, "normal");
+            
+            hideAuthModal();
+
+            // データ競合チェック
+            if (localData && cloudData && localData.score > 0) {
+                localData.uid = oldUidForPushing;
+                showConflictModal(localData, cloudData, newUid);
+            } else if (localData && localData.score > 0 && !cloudData) {
+                localData.uid = oldUidForPushing;
+                await window.updatePersonalDataAfterConflict(localData, newUid);
+                await window.gameAlert("ログインしました。\nプレイデータをクラウドに同期しました。", "LOGIN SUCCESS");
+            } else {
+                await window.gameAlert("ログインしました！\nデータが引き継がれました。", "LOGIN SUCCESS");
+            }
+        } catch (e) {
+            console.error(e);
+            authErrorMsg.style.color = "#ff0055";
+            let msg = "エラーが発生しました。";
+            if (e.code === 'auth/email-already-in-use') msg = "このメールアドレスは既に別のアカウントに連携されています。「ログイン」をお試しください。";
+            if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-login-credentials') msg = "パスワードが間違っています。";
+            if (e.code === 'auth/user-not-found') msg = "このメールアドレスは登録されていません。";
+            if (e.code === 'auth/invalid-email') msg = "メールアドレスの形式が正しくありません。";
+            if (e.code === 'auth/too-many-requests') msg = "試行回数が多すぎます。しばらくお待ちください。";
+            authErrorMsg.innerText = msg;
+        }
+        btnSubmitAuth.disabled = false;
+    });
+
+    const conflictCards = document.querySelectorAll('.conflict-card');
+    conflictCards.forEach(card => {
+        card.addEventListener('click', () => {
+            conflictCards.forEach(c => {
+                c.style.borderColor = c.dataset.choice === 'local' ? '#00f0ff' : '#ff3355';
+                c.style.boxShadow = '';
+                c.style.opacity = '0.5';
+            });
+            card.style.opacity = '1';
+            card.style.boxShadow = `0 0 15px ${card.dataset.choice === 'local' ? 'rgba(0,240,255,0.4)' : 'rgba(255,51,85,0.4)'}`;
+            selectedConflictChoice = card.dataset.choice;
+            btnConfirmConflict.disabled = false;
+        });
+    });
+
+    function showConflictModal(local, cloud, newUid) {
+        selectedConflictChoice = null;
+        btnConfirmConflict.disabled = true;
+        conflictCards.forEach(c => {
+            c.style.opacity = '1';
+            c.style.boxShadow = '';
+            c.style.borderColor = c.dataset.choice === 'local' ? '#00f0ff' : '#ff3355';
+        });
+
+        document.getElementById("conflictLocalScore").innerText = local.score || 0;
+        document.getElementById("conflictLocalTime").innerText = local.playTimeSeconds || 0;
+        
+        document.getElementById("conflictCloudScore").innerText = cloud.score || 0;
+        document.getElementById("conflictCloudTime").innerText = cloud.playTimeSeconds || 0;
+
+        btnConfirmConflict.onclick = async () => {
+            btnConfirmConflict.disabled = true;
+            btnConfirmConflict.innerText = "処理中...";
+            if (selectedConflictChoice === 'local') {
+                await window.updatePersonalDataAfterConflict(local, newUid);
+                await window.gameAlert("現在のプレイデータで上書きしました！", "DATA SYNCED");
+            } else {
+                await window.gameAlert("クラウドのデータを引き継ぎました！", "DATA SYNCED");
+            }
+            dataConflictModal.style.display = "none";
+            btnConfirmConflict.innerText = "選択したデータで引き継ぐ";
+            window.location.reload();
+        };
+
+        dataConflictModal.style.display = "block";
+    }
+
+    btnCancelConflict.addEventListener('click', async () => {
+        dataConflictModal.style.display = "none";
+        await window.gameAlert("クラウドのデータを引き継ぎました。", "DATA SYNCED");
+        window.location.reload();
+    });
+}
+initFirebaseAuthUI();

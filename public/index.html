@@ -161,30 +161,140 @@
         }
 
         .game-modal input[type="text"],
-        .game-modal input[type="number"] {
-            padding: 8px 12px;
+        .game-modal input[type="number"],
+        .game-modal input[type="email"],
+        .game-modal input[type="password"] {
+            padding: 10px 14px;
             border-radius: 2px;
             border: 1px solid rgba(0, 240, 255, 0.3);
             background: rgba(0, 15, 30, 0.8);
             color: #00f0ff;
             font-size: 16px;
             margin-bottom: 8px;
-            font-family: inherit;
-            transition: 0.2s;
+            font-family: 'Rajdhani', 'Orbitron', ui-monospace, SFMono-Regular, monospace;
+            transition: border-color 0.25s, box-shadow 0.25s;
             box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.5);
+            box-sizing: border-box;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
         }
 
         .game-modal input[type="text"] {
             width: 80%;
         }
 
+        .game-modal input[type="email"],
+        .game-modal input[type="password"] {
+            width: 100%;
+        }
+
         .game-modal input[type="text"]:focus,
-        .game-modal input[type="number"]:focus {
+        .game-modal input[type="number"]:focus,
+        .game-modal input[type="email"]:focus,
+        .game-modal input[type="password"]:focus {
             outline: none;
             border-color: #00f0ff;
             box-shadow:
                 0 0 10px rgba(0, 240, 255, 0.3),
                 inset 0 0 5px rgba(0, 240, 255, 0.2);
+        }
+
+        .game-modal input::placeholder {
+            color: rgba(0, 180, 200, 0.35);
+            font-style: italic;
+        }
+
+        /* ===== ゲーム内カスタムアラート ===== */
+        #gameAlertOverlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(3px);
+            -webkit-backdrop-filter: blur(3px);
+            z-index: 9000;
+            display: none;
+            justify-content: center;
+            align-items: center;
+            animation: alertOverlayIn 0.18s ease-out;
+        }
+        #gameAlertOverlay.active { display: flex; }
+
+        @keyframes alertOverlayIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        @keyframes alertOverlayOut {
+            from { opacity: 1; }
+            to { opacity: 0; }
+        }
+
+        #gameAlertBox {
+            position: relative;
+            left: auto;
+            top: auto;
+            transform: none;
+            max-width: 420px;
+            width: 90vw;
+            animation: alertBoxIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+        }
+        @keyframes alertBoxIn {
+            from { opacity: 0; transform: scale(0.92) translateY(8px); }
+            to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        @keyframes alertBoxOut {
+            from { opacity: 1; transform: scale(1) translateY(0); }
+            to { opacity: 0; transform: scale(0.92) translateY(8px); }
+        }
+
+        #gameAlertBox .alert-btn-row {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            margin-top: 8px;
+        }
+
+        /* ===== スタート画面 ログインボタン (右上) ===== */
+        #btnStartLogin {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            z-index: 10;
+            padding: 7px 16px;
+            font-size: 11px;
+            letter-spacing: 1.5px;
+            cursor: pointer;
+            border: 1px solid rgba(0, 240, 255, 0.35);
+            border-left: 3px solid #00f0ff;
+            background: linear-gradient(90deg, rgba(0,0,0,0.5), rgba(0,0,0,0.2));
+            color: #00f0ff;
+            font-family: inherit;
+            font-weight: bold;
+            text-transform: uppercase;
+            transition: all 0.25s ease;
+            border-radius: 2px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+        }
+        #btnStartLogin:hover {
+            background: rgba(0, 240, 255, 0.07);
+            border-color: #00f0ff;
+            box-shadow: 0 0 12px rgba(0, 240, 255, 0.25), inset 0 0 8px rgba(0, 240, 255, 0.1);
+            text-shadow: 0 0 5px #00f0ff;
+        }
+        #btnStartLogin:active {
+            transform: scale(0.96);
+        }
+        #btnStartLogin.logged-in {
+            border-color: rgba(0, 255, 102, 0.4);
+            border-left-color: #00ff66;
+            color: #00ff66;
+        }
+        #btnStartLogin.logged-in:hover {
+            border-color: #00ff66;
+            box-shadow: 0 0 12px rgba(0, 255, 102, 0.25), inset 0 0 8px rgba(0, 255, 102, 0.1);
+            text-shadow: 0 0 5px #00ff66;
         }
 
         /* 洗練されたサイバー風ボタン */
@@ -1404,6 +1514,7 @@
         <div class="start-corner tr"></div>
         <div class="start-corner bl"></div>
         <div class="start-corner br"></div>
+        <div id="btnStartLogin">LOGIN</div>
         <div class="start-content">
             <div class="start-subtitle">SPACE DOGFIGHT</div>
             <div class="start-deco-line"></div>
@@ -1455,6 +1566,7 @@
                     <div class="settings-tab tab-active" data-tab="display">DISPLAY</div>
                     <div class="settings-tab" data-tab="audio">AUDIO</div>
                     <div class="settings-tab" data-tab="controls">CONTROLS</div>
+                    <div class="settings-tab" data-tab="account">ACCOUNT</div>
                 </div>
 
                 <!-- ===== DISPLAY タブ ===== -->
@@ -1626,6 +1738,25 @@
                         </div>
                         <button id="openKeymapFromMenu" class="cyber-btn" style="width: 100%; margin-top: 12px">
                             キーバインド設定
+                        </button>
+                    </div>
+                </div>
+
+                <!-- ===== ACCOUNT タブ ===== -->
+                <div class="settings-tab-content" data-tab-content="account">
+                    <div class="settings-container">
+                        <div style="text-align: center; margin-bottom: 20px;">
+                            <div style="font-size: 11px; color: #aaa; margin-bottom: 4px;">現在のアカウント状態</div>
+                            <div id="accountStatusText" style="font-size: 16px; color: #0f0; letter-spacing: 1px; font-weight: bold; text-shadow: 0 0 10px #0f0;">GUEST (未連携)</div>
+                        </div>
+                        <p style="font-size: 11px; color: #aaa; margin-bottom: 12px; line-height: 1.4;">
+                            メールアドレスを登録してデータをバックアップすることで、別の端末でも同じデータ（ランキング等）で遊ぶことができます。
+                        </p>
+                        <button id="btnOpenAuthFromSettings" class="cyber-btn" style="width: 100%; margin-bottom: 12px;">
+                            データをバックアップする (登録)
+                        </button>
+                        <button id="btnSignOutButton" class="cyber-btn btn-red" style="width: 100%; display: none;">
+                            サインアウト
                         </button>
                     </div>
                 </div>
@@ -2244,6 +2375,71 @@
             style="border-color: #ffff00; color: #ffff00; box-shadow: 0 0 10px rgba(255,255,0,0.4);">閉じる</button>
     </div>
 
+    <!-- アカウント認証モーダル -->
+    <div id="authModal" class="game-modal" style="display: none; width: 400px; z-index: 2500;">
+        <h3 id="authModalTitle" style="color: #00f0ff; text-shadow: 0 0 15px #00f0ff;">ACCOUNT LINK</h3>
+
+        <p id="authModalDesc" style="font-size: 12px; color: #aaa; margin-bottom: 16px; line-height: 1.5;">
+            メールアドレスとパスワードを入力してください。<br>
+            <span style="color:#666;">アカウントが未登録の場合は自動的に新規登録されます。</span>
+        </p>
+
+        <div style="text-align: left; margin-bottom: 12px;">
+            <div style="font-size: 11px; color: #00f0ff; margin-bottom: 4px; letter-spacing: 1px;">EMAIL</div>
+            <input type="email" id="authEmailInput" placeholder="pilot@astrofray.com" />
+        </div>
+        <div style="text-align: left; margin-bottom: 20px;">
+            <div style="font-size: 11px; color: #00f0ff; margin-bottom: 4px; letter-spacing: 1px;">PASSWORD <span style="color:#666;">(6文字以上)</span></div>
+            <input type="password" id="authPasswordInput" placeholder="••••••••" />
+        </div>
+        <div id="authErrorMsg" style="color: #ff0055; font-size: 12px; margin-bottom: 12px; min-height: 16px; text-shadow: 0 0 5px #ff0055;"></div>
+
+        <div style="display: flex; justify-content: space-between;">
+            <button id="btnCancelAuth" class="cyber-btn btn-red" style="width: 45%;">キャンセル</button>
+            <button id="btnSubmitAuth" class="cyber-btn" style="width: 45%;">LINK</button>
+        </div>
+    </div>
+
+    <!-- データコンフリクト（競合）解決モーダル -->
+    <div id="dataConflictModal" class="game-modal" style="display: none; width: 480px; z-index: 2600; background: rgba(5,5,15,0.98); border: 2px solid #ffaa00;">
+        <h3 style="color: #ffaa00; text-shadow: 0 0 15px #ffaa00;">DATA CONFLICT</h3>
+        <p style="font-size: 13px; color: #fff; margin-bottom: 16px; line-height: 1.5;">
+            ログイン先のアカウントにプレイデータが存在します。どちらのデータを使用（保持）するか選択してください。
+        </p>
+        
+        <div style="display: flex; justify-content: space-between; gap: 12px; margin-bottom: 16px;">
+            <!-- 現在のデータ -->
+            <div id="conflictLocalData" style="flex: 1; padding: 12px; border: 1px dashed #00f0ff; background: rgba(0, 240, 255, 0.05); text-align: left; cursor: pointer; transition: all 0.2s;" class="conflict-card" data-choice="local">
+                <div style="font-weight: bold; color: #00f0ff; margin-bottom: 8px;">▶ 現在のプレイデータ</div>
+                <div style="font-size: 12px; color: #aaa;">ハイスコア: <span id="conflictLocalScore" style="color:#fff;">---</span></div>
+                <div style="font-size: 12px; color: #aaa;">プレイ時間: <span id="conflictLocalTime" style="color:#fff;">---</span>s</div>
+            </div>
+            <!-- クラウドのデータ -->
+            <div id="conflictCloudData" style="flex: 1; padding: 12px; border: 1px dashed #ff3355; background: rgba(255, 51, 85, 0.05); text-align: left; cursor: pointer; transition: all 0.2s;" class="conflict-card" data-choice="cloud">
+                <div style="font-weight: bold; color: #ff3355; margin-bottom: 8px;">▶ クラウドのデータ</div>
+                <div style="font-size: 12px; color: #aaa;">ハイスコア: <span id="conflictCloudScore" style="color:#fff;">---</span></div>
+                <div style="font-size: 12px; color: #aaa;">プレイ時間: <span id="conflictCloudTime" style="color:#fff;">---</span>s</div>
+            </div>
+        </div>
+
+        <button id="btnConfirmConflict" class="cyber-btn btn-orange" style="width: 100%; padding: 10px; font-size: 14px;" disabled>選択したデータで引き継ぐ</button>
+        <div style="margin-top: 10px; text-align: center;">
+            <button id="btnCancelConflict" class="cyber-btn" style="padding: 4px 12px; font-size: 11px;">キャンセルして戻る</button>
+        </div>
+    </div>
+
+    <!-- ゲーム内カスタムアラート/確認モーダル -->
+    <div id="gameAlertOverlay">
+        <div id="gameAlertBox" class="game-modal">
+            <h3 id="gameAlertTitle" style="font-size: 18px;">NOTICE</h3>
+            <p id="gameAlertMessage" style="font-size: 13px; line-height: 1.6; white-space: pre-wrap;"></p>
+            <div class="alert-btn-row">
+                <button id="gameAlertCancelBtn" class="cyber-btn btn-red" style="display: none; min-width: 100px;">キャンセル</button>
+                <button id="gameAlertOkBtn" class="cyber-btn" style="min-width: 120px;">OK</button>
+            </div>
+        </div>
+    </div>
+
 
     <!-- ===== Firestore ===== -->
     <script type="module">
@@ -2263,7 +2459,16 @@
             onSnapshot,
             deleteDoc,
         } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
-        import { getAuth } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-auth.js";
+        import { 
+            getAuth, 
+            signInAnonymously, 
+            onAuthStateChanged, 
+            createUserWithEmailAndPassword, 
+            signInWithEmailAndPassword, 
+            signOut,
+            linkWithCredential,
+            EmailAuthProvider
+        } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-auth.js";
         // ローカルテスト用（開発用プロジェクト）のフォールバック設定
         let firebaseConfig = {
             apiKey: "AIzaSyBidGHWWtqayly9pMdpAZcHHXqCmor-IKw",
@@ -2288,6 +2493,18 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         const auth = getAuth(app);
+        
+        window.firebaseDb = db;
+        window.firebaseAuth = auth;
+        window.firebaseAuthUI = {
+            signInAnonymously,
+            onAuthStateChanged,
+            createUserWithEmailAndPassword,
+            signInWithEmailAndPassword,
+            signOut,
+            linkWithCredential,
+            EmailAuthProvider
+        };
         
         // Photon等から環境情報を参照できるようにグローバルスコープへ露出
         window.currentFirebaseProjectId = firebaseConfig.projectId;
@@ -2329,10 +2546,24 @@
             const finalScore = normalizeToNumber(rawScore) || 0;
             const pTime = normalizeToNumber(playTimeSeconds) || 0;
             const name = localStorage.getItem("playerNickname_v1") || "UNKNOWN";
+            const currentUid = auth.currentUser ? auth.currentUser.uid : null;
+            
+            if (!currentUid) {
+                return { ok: false, reason: 'unauthenticated' };
+            }
+
             const colRef = collection(db, colName);
-            const q = query(colRef, where("name", "==", name), limit(1));
+            // 優先して UID でクエリ。もし UID で無ければ、フォールバックで name (過去の互換性)
+            let q = query(colRef, where("uid", "==", currentUid), limit(1));
+            
             try {
-                const querySnapshot = await getDocs(q);
+                let querySnapshot = await getDocs(q);
+                if (querySnapshot.empty) {
+                    // もし UID が無ければ Name でも探す（古い仕様への互換性）
+                    q = query(colRef, where("name", "==", name), limit(1));
+                    querySnapshot = await getDocs(q);
+                }
+
                 if (querySnapshot.empty) {
                     const docRef = await addDoc(colRef, {
                         name,
@@ -2340,19 +2571,27 @@
                         playTimeSeconds: pTime,
                         difficulty: diff,
                         createdAt: serverTimestamp(),
-                        uid: auth.currentUser ? auth.currentUser.uid : null,
+                        uid: currentUid,
                     });
                     return { ok: true };
                 } else {
                     const existingDoc = querySnapshot.docs[0];
                     const existingScore = existingDoc.data().score || 0;
+                    // 同一 UID もしくは同一 Name の場合、名前の更新とスコアの更新を行う
                     if (finalScore > existingScore) {
                         await updateDoc(doc(db, colName, existingDoc.id), {
+                            name: name, // 最新の名前に上書き
                             score: finalScore,
                             playTimeSeconds: pTime,
+                            uid: currentUid, // UIDも更新
                         });
                         return { ok: true };
                     } else {
+                        // スコアが低くても、名前やUIDは同期させておく
+                        await updateDoc(doc(db, colName, existingDoc.id), {
+                            name: name,
+                            uid: currentUid
+                        });
                         return { ok: true };
                     }
                 }
@@ -2361,6 +2600,70 @@
                 return { ok: false, reason: err.code };
             }
         }
+        
+        window.getPersonalHighScoreAndData = async function(uid, diff = "normal") {
+            const colName = diff === "easy" ? "rankings_easy" : diff === "hard" ? "rankings_hard" : "rankings";
+            try {
+                const colRef = collection(db, colName);
+                const q = query(colRef, where("uid", "==", uid), limit(1));
+                const snap = await getDocs(q);
+                if (!snap.empty) {
+                    return snap.docs[0].data();
+                }
+            } catch(e) {}
+            return null;
+        };
+        
+        window.updatePersonalDataAfterConflict = async function(keepData, targetUid, diffs = ["easy", "normal", "hard"]) {
+            // keepData (Score, playTime) を targetUid の各難易度ドキュメントに強制上書きする。
+            for(let diff of diffs) {
+                const colName = diff === "easy" ? "rankings_easy" : diff === "hard" ? "rankings_hard" : "rankings";
+                try {
+                    const colRef = collection(db, colName);
+                    const qTarget = query(colRef, where("uid", "==", targetUid), limit(1));
+                    const snapTarget = await getDocs(qTarget);
+                    
+                    const qKeep = query(colRef, where("uid", "==", keepData.uid), limit(1));
+                    const snapKeep = await getDocs(qKeep);
+                    
+                    if (!snapKeep.empty) {
+                        const kd = snapKeep.docs[0].data();
+                        if (!snapTarget.empty) {
+                            await updateDoc(doc(db, colName, snapTarget.docs[0].id), {
+                                score: kd.score,
+                                playTimeSeconds: kd.playTimeSeconds,
+                                name: kd.name
+                            });
+                        } else {
+                            await addDoc(colRef, {
+                                name: kd.name,
+                                score: kd.score,
+                                playTimeSeconds: kd.playTimeSeconds,
+                                difficulty: diff,
+                                createdAt: serverTimestamp(),
+                                uid: targetUid
+                            });
+                        }
+                    }
+                } catch(e) {}
+            }
+        };
+
+        window.checkNicknameUnique = async function(name, currentUid) {
+            // Check cross all rankings if any other uid is using this name
+            for (let diff of ["easy", "normal", "hard"]) {
+                const colName = diff === "easy" ? "rankings_easy" : diff === "hard" ? "rankings_hard" : "rankings";
+                const q = query(collection(db, colName), where("name", "==", name), limit(10));
+                const snap = await getDocs(q);
+                for (let docSnap of snap.docs) {
+                    const data = docSnap.data();
+                    if (data.uid && data.uid !== currentUid) {
+                        return false; // Not unique
+                    }
+                }
+            }
+            return true; // Unique
+        };
         async function fetchTopRanks(difficulty) {
             const diff = difficulty || "normal";
             const colName =
@@ -2489,7 +2792,7 @@
 
                 window.connectToPhoton(roomId, true);
             } catch (e) {
-                alert("ネットワークエラー");
+                window.gameAlert("ネットワークエラーが発生しました。", "NETWORK ERROR");
                 btnConfirmCreateRoom.disabled = false;
                 btnConfirmCreateRoom.innerText = "作成";
             }

@@ -22,7 +22,8 @@
       "node scripts/obfuscate.js"
     ],
     "postdeploy": [
-      "node scripts/restore.js"
+      "node scripts/restore.js",
+      "node scripts/deploy-cloudflare.js"
     ]
   }
 }

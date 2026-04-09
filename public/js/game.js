@@ -1206,7 +1206,7 @@ let keys = {};
 let mouse = { x: 0, y: 0, movementX: 0, movementY: 0, down: false };
 let bindingAction = null;
 
-const GAME_VERSION = "1.4.2";
+const GAME_VERSION = "1.4.4";
 let running = false,
     showHelp = false;
 let isPaused = false;
@@ -6973,15 +6973,39 @@ function initFirebaseAuthUI() {
     const btnCancelConflict = document.getElementById("btnCancelConflict");
     let selectedConflictChoice = null;
 
-    // 古い匿名アカウントのクリーンアップ（Firebase Authから匿名ユーザーを削除）
-    // ※ Firestoreの旧ランキングデータは名前ベースの重複排除で表示上は問題ないため残す
-    async function cleanupOldAnonymousAccount(oldUser) {
-        if (!oldUser) return;
+    // 古い匿名アカウントのクリーンアップ（Cloudflare Workers経由で安全に削除）
+    async function cleanupOldAnonymousAccount(oldUid) {
+        if (!oldUid) return;
         try {
-            await oldUser.delete();
+            // 1. 現在のアカウントの認証用トークンを取得
+            const newIdToken = await window.firebaseAuth.currentUser.getIdToken();
+
+            // 2. 環境（本番・テスト）に応じてリクエスト先URLを切り替え
+            const isProd = window.currentFirebaseProjectId === "astro-fray";
+            const baseUrl = isProd 
+                ? "https://astro-fray-prod.astro-fray-server.workers.dev/" 
+                : "https://astro-fray-dev.astro-fray-server.workers.dev/";
+            
+            // パスを指定してリクエスト
+            const workerUrl = baseUrl.replace(/\/$/, '') + "/api/cleanup-anonymous";
+
+            // 3. Cloudflare WorkersのAPIへ削除リクエストを送信
+            const response = await fetch(workerUrl, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ token: newIdToken, oldUid: oldUid })
+            });
+
+            if (!response.ok) {
+                console.error("サーバーでのデータ削除に失敗しました:", await response.text());
+                return;
+            }
+
+            console.log("🗑️ 古い匿名アカウントとFirestoreデータを安全に消去しました");
         } catch(e) {
-            // ログイン切替後はトークン失効で失敗する可能性がある（管理者側で定期クリーンアップ推奨）
-            console.warn("Could not delete old anonymous user:", e);
+            console.warn("Could not cleanup old anonymous user:", e);
         }
     }
 
@@ -7095,12 +7119,10 @@ function initFirebaseAuthUI() {
 
         let localData = null;
         let oldUidForPushing = null;
-        let oldAnonymousUser = null;
 
         try {
             // ===== 統合フロー: まず linkWithCredential → 失敗したらログイン =====
             if (auth.currentUser && auth.currentUser.isAnonymous) {
-                oldAnonymousUser = auth.currentUser;
                 oldUidForPushing = auth.currentUser.uid;
                 localData = await window.getPersonalHighScoreAndData(oldUidForPushing, "normal");
 
@@ -7126,7 +7148,7 @@ function initFirebaseAuthUI() {
                                 localData.uid = oldUidForPushing;
                                 await window.updatePersonalDataAfterConflict(localData, newUid);
                             }
-                            await cleanupOldAnonymousAccount(oldAnonymousUser);
+                            await cleanupOldAnonymousAccount(oldUidForPushing);
                             hideAuthModal();
                             await window.gameAlert("アカウントを作成し、データを引き継ぎました！\nデータが安全にバックアップされています。", "SIGNUP SUCCESS");
                             updateAccountUI(auth.currentUser);
@@ -7154,18 +7176,14 @@ function initFirebaseAuthUI() {
             
             hideAuthModal();
 
-            // データ競合チェック
-            if (localData && cloudData && localData.score > 0) {
+            // データ選択（匿名アカウントが存在していた場合は常に選択モーダルを出す）
+            if (oldUidForPushing) {
+                localData = localData || { score: 0, playTimeSeconds: 0 };
+                cloudData = cloudData || { score: 0, playTimeSeconds: 0 };
                 localData.uid = oldUidForPushing;
-                showConflictModal(localData, cloudData, newUid, oldAnonymousUser);
-            } else if (localData && localData.score > 0 && !cloudData) {
-                localData.uid = oldUidForPushing;
-                await window.updatePersonalDataAfterConflict(localData, newUid);
-                await cleanupOldAnonymousAccount(oldAnonymousUser);
-                await window.gameAlert("ログインしました。\nプレイデータをクラウドに同期しました。", "LOGIN SUCCESS");
+                showConflictModal(localData, cloudData, newUid, oldUidForPushing);
             } else {
-                await cleanupOldAnonymousAccount(oldAnonymousUser);
-                await window.gameAlert("ログインしました！\nデータが引き継がれました。", "LOGIN SUCCESS");
+                await window.gameAlert("ログインしました！", "LOGIN SUCCESS");
             }
         } catch (e) {
             console.error(e);
@@ -7197,7 +7215,7 @@ function initFirebaseAuthUI() {
         });
     });
 
-    function showConflictModal(local, cloud, newUid, oldAnonymousUser) {
+    function showConflictModal(local, cloud, newUid, oldUidForPushing) {
         selectedConflictChoice = null;
         btnConfirmConflict.disabled = true;
         conflictCards.forEach(c => {
@@ -7222,17 +7240,19 @@ function initFirebaseAuthUI() {
                 await window.gameAlert("クラウドのデータを引き継ぎました！", "DATA SYNCED");
             }
             // 古い匿名アカウントをクリーンアップ
-            await cleanupOldAnonymousAccount(oldAnonymousUser);
+            if (oldUidForPushing) await cleanupOldAnonymousAccount(oldUidForPushing);
             dataConflictModal.style.display = "none";
             btnConfirmConflict.innerText = "選択したデータで引き継ぐ";
+            await window.gameAlert("画面を再読み込みして変更を反映します...", "RELOADING");
             window.location.reload();
         };
 
         // キャンセル時も古い匿名アカウントをクリーンアップ
         btnCancelConflict.onclick = async () => {
             dataConflictModal.style.display = "none";
-            await cleanupOldAnonymousAccount(oldAnonymousUser);
-            await window.gameAlert("クラウドのデータを引き継ぎました。", "DATA SYNCED");
+            if (oldUidForPushing) await cleanupOldAnonymousAccount(oldUidForPushing);
+            await window.gameAlert("キャンセルしました。クラウドのデータを引き継ぎます。", "DATA SYNCED");
+            await window.gameAlert("画面を再読み込みして変更を反映します...", "RELOADING");
             window.location.reload();
         };
 

@@ -127,12 +127,23 @@ function debouncedCloudSync() {
 function collectAllSettings() {
     const features = loadFeatureSettings();
     const audio = loadAudioSettings();
+    const keyBindings = loadKeyBindings();
+    const uiLayout = JSON.parse(localStorage.getItem("uiLayout_v1") || "{}");
+    
     return {
         features,
         audio,
+        keyBindings,
+        uiLayout,
+        zoomLevel: parseFloat(localStorage.getItem("zoomLevel_v1")) || 1.0,
+        minecraftSensitivity: parseFloat(localStorage.getItem("minecraftSensitivity_v1") || "5"),
+        controlMode: localStorage.getItem("controlMode_v1") || "mouse",
+        minecraftMode: localStorage.getItem("minecraftMode_v1") === "1",
+        forceTouchUI: localStorage.getItem("forceTouchUI_v1") === "1",
         lightweight: localStorage.getItem('lightweight_v1') === '1',
         simpleTransition: localStorage.getItem('simpleTransition_v1') === '1',
         nickname: localStorage.getItem('playerNickname_v1') || 'UNKNOWN',
+        devMode: localStorage.getItem("devMode_v1") === "1"
     };
 }
 let audioSettings = loadAudioSettings();
@@ -1254,7 +1265,7 @@ let keys = {};
 let mouse = { x: 0, y: 0, movementX: 0, movementY: 0, down: false };
 let bindingAction = null;
 
-const GAME_VERSION = "1.5.0";
+const GAME_VERSION = "1.5.3";
 let running = false,
     showHelp = false;
 let isPaused = false;
@@ -1313,6 +1324,7 @@ function setPauseState(paused) {
         }
     }
     updateTouchUIVisibility();
+    if (window.debouncedCloudSync) window.debouncedCloudSync();
 }
 
 window.addEventListener("keydown", (e) => {
@@ -1650,7 +1662,7 @@ function isTouchOnUI(touch) {
     if (!el) return false;
     return (
         el.closest(
-            "#touchUI, #joystickArea, #joystickBase, #touchBtns, .game-modal, #pauseSettingsMenu",
+            "#touchBtns, .game-modal, #pauseSettingsMenu, .touch-action-btn",
         ) !== null
     );
 }
@@ -5914,6 +5926,7 @@ lightweightToggle?.addEventListener("click", () => {
     applyLightweightMode(!lightweightMode);
     setLightweightUI(lightweightMode);
     applyFeatureSettingsToRuntime();
+    debouncedCloudSync();
 });
 lightweightToggle?.addEventListener("keydown", (e) => {
     if (e.key === " " || e.key === "Enter") {
@@ -5921,6 +5934,7 @@ lightweightToggle?.addEventListener("keydown", (e) => {
         applyLightweightMode(!lightweightMode);
         setLightweightUI(lightweightMode);
         applyFeatureSettingsToRuntime();
+        debouncedCloudSync();
     }
 });
 
@@ -5932,6 +5946,7 @@ if (toggleSimpleTransition) {
         simpleTransition = v;
         localStorage.setItem('simpleTransition_v1', v ? '1' : '0');
         setToggleElem(toggleSimpleTransition, v);
+        debouncedCloudSync();
     });
 }
 
@@ -6038,6 +6053,17 @@ saveNicknameBtn?.addEventListener("click", async () => {
             }
         } catch(e) {
             console.error(e);
+            const errContainer = document.getElementById("nicknameErrorContainer");
+            const errMsg = document.getElementById("nicknameErrorMessage");
+            if (errMsg && errContainer) {
+                errMsg.style.color = "#ffaa00";
+                errMsg.innerText = "通信エラーか予期せぬエラーが発生しました。\n再試行してください。(" + (e.message || "Unknown error") + ")";
+                errContainer.style.maxHeight = "100px";
+                errContainer.style.opacity = "1";
+            }
+            saveNicknameBtn.disabled = false;
+            saveNicknameBtn.innerText = "システム起動";
+            return;
         }
         
         saveNicknameBtn.disabled = false;
@@ -7203,6 +7229,71 @@ function initFirebaseAuthUI() {
     onAuthStateChanged(auth, async (user) => {
         if (user) {
             updateAccountUI(user);
+            if (!user.isAnonymous && window.restoreSettingsFromCloud) {
+                const cloudData = await window.restoreSettingsFromCloud();
+                if (cloudData) {
+                    if (cloudData.features) {
+                        localStorage.setItem("featureSettings_v1", JSON.stringify(cloudData.features));
+                        Object.assign(featureSettings, cloudData.features);
+                        applyFeatureSettingsToRuntime();
+                    }
+                    if (cloudData.audio) {
+                        localStorage.setItem("audioSettings_v1", JSON.stringify(cloudData.audio));
+                        Object.assign(audioSettings, cloudData.audio);
+                        if (window.sfxGain) window.sfxGain.gain.value = audioSettings.sfx;
+                        if (window.bgmGainNode) window.bgmGainNode.gain.value = audioSettings.bgm;
+                    }
+                    if (cloudData.lightweight !== undefined) {
+                        localStorage.setItem("lightweight_v1", cloudData.lightweight ? "1" : "0");
+                        if (typeof applyLightweightMode === "function") applyLightweightMode(cloudData.lightweight);
+                        const lt = document.getElementById("lightweightToggle");
+                        if (lt && typeof setLightweightUI === "function") setLightweightUI(cloudData.lightweight);
+                    }
+                    if (cloudData.simpleTransition !== undefined) {
+                        localStorage.setItem("simpleTransition_v1", cloudData.simpleTransition ? "1" : "0");
+                        simpleTransition = cloudData.simpleTransition;
+                        const st = document.getElementById("toggleSimpleTransition");
+                        if (st && typeof setToggleElem === "function") setToggleElem(st, cloudData.simpleTransition);
+                    }
+                    if (cloudData.nickname) {
+                        localStorage.setItem("playerNickname_v1", cloudData.nickname);
+                        const acctNickname = document.getElementById('acctNickname');
+                        if (acctNickname) acctNickname.textContent = cloudData.nickname;
+                    }
+                    if (cloudData.keyBindings) {
+                        localStorage.setItem("keyBindings_v1", JSON.stringify(cloudData.keyBindings));
+                        Object.assign(keyBindings, cloudData.keyBindings);
+                        renderKeymapList();
+                    }
+                    if (cloudData.uiLayout) {
+                        localStorage.setItem("uiLayout_v1", JSON.stringify(cloudData.uiLayout));
+                        // UILayoutManager will naturally pick it up on next use or we could force refresh
+                    }
+                    if (cloudData.zoomLevel !== undefined) {
+                        localStorage.setItem("zoomLevel_v1", cloudData.zoomLevel.toString());
+                        zoomLevel = cloudData.zoomLevel;
+                    }
+                    if (cloudData.minecraftSensitivity !== undefined) {
+                        localStorage.setItem("minecraftSensitivity_v1", cloudData.minecraftSensitivity.toString());
+                        minecraftSensitivity = cloudData.minecraftSensitivity;
+                    }
+                    if (cloudData.controlMode) {
+                        localStorage.setItem("controlMode_v1", cloudData.controlMode);
+                        controlMode = cloudData.controlMode;
+                    }
+                    if (cloudData.minecraftMode !== undefined) {
+                        localStorage.setItem("minecraftMode_v1", cloudData.minecraftMode ? "1" : "0");
+                        minecraftMode = cloudData.minecraftMode;
+                    }
+                    if (cloudData.forceTouchUI !== undefined) {
+                        localStorage.setItem("forceTouchUI_v1", cloudData.forceTouchUI ? "1" : "0");
+                        useTouchUI = cloudData.forceTouchUI;
+                        updateTouchUIVisibility();
+                    }
+                } else {
+                    debouncedCloudSync();
+                }
+            }
         } else {
             try {
                 await signInAnonymously(auth);
@@ -7268,6 +7359,27 @@ function initFirebaseAuthUI() {
         }
         if (cloudData.nickname) {
             localStorage.setItem("playerNickname_v1", cloudData.nickname);
+        }
+        if (cloudData.keyBindings) {
+            localStorage.setItem("keyBindings_v1", JSON.stringify(cloudData.keyBindings));
+        }
+        if (cloudData.uiLayout) {
+            localStorage.setItem("uiLayout_v1", JSON.stringify(cloudData.uiLayout));
+        }
+        if (cloudData.zoomLevel !== undefined) {
+            localStorage.setItem("zoomLevel_v1", cloudData.zoomLevel.toString());
+        }
+        if (cloudData.minecraftSensitivity !== undefined) {
+            localStorage.setItem("minecraftSensitivity_v1", cloudData.minecraftSensitivity.toString());
+        }
+        if (cloudData.controlMode) {
+            localStorage.setItem("controlMode_v1", cloudData.controlMode);
+        }
+        if (cloudData.minecraftMode !== undefined) {
+            localStorage.setItem("minecraftMode_v1", cloudData.minecraftMode ? "1" : "0");
+        }
+        if (cloudData.forceTouchUI !== undefined) {
+            localStorage.setItem("forceTouchUI_v1", cloudData.forceTouchUI ? "1" : "0");
         }
         await window.gameAlert("クラウドから設定を復元しました。\nページを再読み込みして反映します。", "RESTORE");
         window.location.reload();

@@ -220,15 +220,29 @@
             align-items: center;
             animation: alertOverlayIn 0.18s ease-out;
         }
-        #gameAlertOverlay.active { display: flex; }
+
+        #gameAlertOverlay.active {
+            display: flex;
+        }
 
         @keyframes alertOverlayIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
+            from {
+                opacity: 0;
+            }
+
+            to {
+                opacity: 1;
+            }
         }
+
         @keyframes alertOverlayOut {
-            from { opacity: 1; }
-            to { opacity: 0; }
+            from {
+                opacity: 1;
+            }
+
+            to {
+                opacity: 0;
+            }
         }
 
         #gameAlertBox {
@@ -240,13 +254,29 @@
             width: 90vw;
             animation: alertBoxIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
         }
+
         @keyframes alertBoxIn {
-            from { opacity: 0; transform: scale(0.92) translateY(8px); }
-            to { opacity: 1; transform: scale(1) translateY(0); }
+            from {
+                opacity: 0;
+                transform: scale(0.92) translateY(8px);
+            }
+
+            to {
+                opacity: 1;
+                transform: scale(1) translateY(0);
+            }
         }
+
         @keyframes alertBoxOut {
-            from { opacity: 1; transform: scale(1) translateY(0); }
-            to { opacity: 0; transform: scale(0.92) translateY(8px); }
+            from {
+                opacity: 1;
+                transform: scale(1) translateY(0);
+            }
+
+            to {
+                opacity: 0;
+                transform: scale(0.92) translateY(8px);
+            }
         }
 
         #gameAlertBox .alert-btn-row {
@@ -559,7 +589,7 @@
             touch-action: manipulation;
             -webkit-tap-highlight-color: transparent;
         }
-        
+
         /* ワープトランジション */
         #warpTransitionOverlay {
             position: fixed;
@@ -572,7 +602,7 @@
             opacity: 0;
             transition: opacity 0.3s ease;
         }
-        
+
         #warpStarCanvas {
             position: absolute;
             inset: 0;
@@ -1250,8 +1280,13 @@
         }
 
         @keyframes startScreenFadeOut {
-            0% { opacity: 1; }
-            100% { opacity: 0; }
+            0% {
+                opacity: 1;
+            }
+
+            100% {
+                opacity: 0;
+            }
         }
 
         /* 星背景 */
@@ -1267,13 +1302,11 @@
         .start-scanlines {
             position: absolute;
             inset: 0;
-            background: repeating-linear-gradient(
-                0deg,
-                transparent,
-                transparent 2px,
-                rgba(0, 240, 255, 0.015) 2px,
-                rgba(0, 240, 255, 0.015) 4px
-            );
+            background: repeating-linear-gradient(0deg,
+                    transparent,
+                    transparent 2px,
+                    rgba(0, 240, 255, 0.015) 2px,
+                    rgba(0, 240, 255, 0.015) 4px);
             pointer-events: none;
             z-index: 1;
         }
@@ -1282,12 +1315,10 @@
         .start-vignette {
             position: absolute;
             inset: 0;
-            background: radial-gradient(
-                ellipse at center,
-                transparent 40%,
-                rgba(2, 5, 16, 0.6) 75%,
-                rgba(2, 5, 16, 0.95) 100%
-            );
+            background: radial-gradient(ellipse at center,
+                    transparent 40%,
+                    rgba(2, 5, 16, 0.6) 75%,
+                    rgba(2, 5, 16, 0.95) 100%);
             pointer-events: none;
             z-index: 2;
         }
@@ -1318,8 +1349,15 @@
         }
 
         @keyframes startDecoFadeIn {
-            from { opacity: 0; width: 0; }
-            to { opacity: 1; width: 280px; }
+            from {
+                opacity: 0;
+                width: 0;
+            }
+
+            to {
+                opacity: 1;
+                width: 280px;
+            }
         }
 
         /* サブタイトル */
@@ -1333,8 +1371,15 @@
         }
 
         @keyframes startTextFadeIn {
-            from { opacity: 0; transform: translateY(8px); }
-            to { opacity: 1; transform: translateY(0); }
+            from {
+                opacity: 0;
+                transform: translateY(8px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
         /* タイトル */
@@ -1365,9 +1410,21 @@
         }
 
         @keyframes startTitleIn {
-            0% { opacity: 0; transform: scale(0.8); letter-spacing: 30px; }
-            60% { opacity: 1; }
-            100% { opacity: 1; transform: scale(1); letter-spacing: 12px; }
+            0% {
+                opacity: 0;
+                transform: scale(0.8);
+                letter-spacing: 30px;
+            }
+
+            60% {
+                opacity: 1;
+            }
+
+            100% {
+                opacity: 1;
+                transform: scale(1);
+                letter-spacing: 12px;
+            }
         }
 
         /* アクションテキスト */
@@ -1381,10 +1438,13 @@
         }
 
         @keyframes startActionPulse {
-            0%, 100% {
+
+            0%,
+            100% {
                 opacity: 0.5;
                 text-shadow: 0 0 5px rgba(0, 240, 255, 0.3);
             }
+
             50% {
                 opacity: 1;
                 text-shadow:
@@ -1413,14 +1473,43 @@
             opacity: 0;
             animation: startCornerIn 0.8s ease-out 0.8s forwards;
         }
-        .start-corner.tl { top: 20px; left: 20px; border-top: 2px solid rgba(0, 240, 255, 0.4); border-left: 2px solid rgba(0, 240, 255, 0.4); }
-        .start-corner.tr { top: 20px; right: 20px; border-top: 2px solid rgba(0, 240, 255, 0.4); border-right: 2px solid rgba(0, 240, 255, 0.4); }
-        .start-corner.bl { bottom: 20px; left: 20px; border-bottom: 2px solid rgba(0, 240, 255, 0.4); border-left: 2px solid rgba(0, 240, 255, 0.4); }
-        .start-corner.br { bottom: 20px; right: 20px; border-bottom: 2px solid rgba(0, 240, 255, 0.4); border-right: 2px solid rgba(0, 240, 255, 0.4); }
+
+        .start-corner.tl {
+            top: 20px;
+            left: 20px;
+            border-top: 2px solid rgba(0, 240, 255, 0.4);
+            border-left: 2px solid rgba(0, 240, 255, 0.4);
+        }
+
+        .start-corner.tr {
+            top: 20px;
+            right: 20px;
+            border-top: 2px solid rgba(0, 240, 255, 0.4);
+            border-right: 2px solid rgba(0, 240, 255, 0.4);
+        }
+
+        .start-corner.bl {
+            bottom: 20px;
+            left: 20px;
+            border-bottom: 2px solid rgba(0, 240, 255, 0.4);
+            border-left: 2px solid rgba(0, 240, 255, 0.4);
+        }
+
+        .start-corner.br {
+            bottom: 20px;
+            right: 20px;
+            border-bottom: 2px solid rgba(0, 240, 255, 0.4);
+            border-right: 2px solid rgba(0, 240, 255, 0.4);
+        }
 
         @keyframes startCornerIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
+            from {
+                opacity: 0;
+            }
+
+            to {
+                opacity: 1;
+            }
         }
 
         /* レスポンシブ */
@@ -1429,25 +1518,49 @@
                 font-size: 32px;
                 letter-spacing: 8px;
             }
+
             @keyframes startTitleIn {
-                0% { opacity: 0; transform: scale(0.8); letter-spacing: 20px; }
-                60% { opacity: 1; }
-                100% { opacity: 1; transform: scale(1); letter-spacing: 8px; }
+                0% {
+                    opacity: 0;
+                    transform: scale(0.8);
+                    letter-spacing: 20px;
+                }
+
+                60% {
+                    opacity: 1;
+                }
+
+                100% {
+                    opacity: 1;
+                    transform: scale(1);
+                    letter-spacing: 8px;
+                }
             }
+
             .start-action {
                 font-size: 13px;
                 letter-spacing: 3px;
             }
+
             .start-subtitle {
                 font-size: 9px;
                 letter-spacing: 4px;
             }
+
             .start-deco-line {
                 width: 180px;
             }
+
             @keyframes startDecoFadeIn {
-                from { opacity: 0; width: 0; }
-                to { opacity: 1; width: 180px; }
+                from {
+                    opacity: 0;
+                    width: 0;
+                }
+
+                to {
+                    opacity: 1;
+                    width: 180px;
+                }
             }
         }
     </style>
@@ -1489,7 +1602,9 @@
         <canvas id="warpStarCanvas"></canvas>
     </div>
 
-    <div id="screenFadeOverlay" style="position:fixed;inset:0;background:#050510;z-index:99999;pointer-events:none;opacity:0;transition:none;"></div>
+    <div id="screenFadeOverlay"
+        style="position:fixed;inset:0;background:#050510;z-index:99999;pointer-events:none;opacity:0;transition:none;">
+    </div>
     <div id="game-wrap">
         <canvas id="game"></canvas>
         <div class="top-right" id="stats"></div>
@@ -1598,7 +1713,8 @@
                         </div>
                         <div class="setting-row">
                             <div>シンプル画面遷移</div>
-                            <div id="toggleSimpleTransition" class="toggle" role="switch" aria-checked="false" tabindex="0">
+                            <div id="toggleSimpleTransition" class="toggle" role="switch" aria-checked="false"
+                                tabindex="0">
                                 <div class="knob"></div>
                             </div>
                         </div>
@@ -1631,7 +1747,8 @@
                             </div>
                         </div>
                         <div class="setting-row" style="margin-top: 5px;">
-                            <button id="btnOpenUILayoutEditor" class="cyber-btn btn-orange" style="width: 100%; font-size: 11px; padding: 6px;">HUDレイアウト設定</button>
+                            <button id="btnOpenUILayoutEditor" class="cyber-btn btn-orange"
+                                style="width: 100%; font-size: 11px; padding: 6px;">HUDレイアウト設定</button>
                         </div>
                         <div class="setting-row">
                             <div>フルスクリーン</div>
@@ -1692,9 +1809,11 @@
                                 <div class="knob"></div>
                             </div>
                         </div>
-                        <div class="setting-row" id="minecraftSensitivityRow" style="padding-left: 10px; border-bottom: none; display: flex; align-items: center; justify-content: space-between;">
+                        <div class="setting-row" id="minecraftSensitivityRow"
+                            style="padding-left: 10px; border-bottom: none; display: flex; align-items: center; justify-content: space-between;">
                             <div style="font-size: 12px; color: #88ced0;">カメラ感度</div>
-                            <input type="range" id="minecraftSensitivitySlider" min="1" max="10" value="5" step="1" style="width: 100px;">
+                            <input type="range" id="minecraftSensitivitySlider" min="1" max="10" value="5" step="1"
+                                style="width: 100px;">
                         </div>
                         <div class="setting-row">
                             <div>タッチコントロール</div>
@@ -1713,9 +1832,12 @@
                     <div class="settings-container">
                         <div style="text-align: center; margin-bottom: 16px;">
                             <div style="font-size: 11px; color: #aaa; margin-bottom: 4px;">ステータス</div>
-                            <div id="accountStatusText" style="font-size: 16px; color: #0f0; letter-spacing: 1px; font-weight: bold; text-shadow: 0 0 10px #0f0;">GUEST (未連携)</div>
+                            <div id="accountStatusText"
+                                style="font-size: 16px; color: #0f0; letter-spacing: 1px; font-weight: bold; text-shadow: 0 0 10px #0f0;">
+                                GUEST (未連携)</div>
                         </div>
-                        <div id="accountDetailSection" style="display:none; text-align:left; font-size:12px; color:#aac; margin-bottom:14px; line-height:1.8; border:1px solid rgba(0,240,255,0.15); border-radius:4px; padding:10px;">
+                        <div id="accountDetailSection"
+                            style="display:none; text-align:left; font-size:12px; color:#aac; margin-bottom:14px; line-height:1.8; border:1px solid rgba(0,240,255,0.15); border-radius:4px; padding:10px;">
                             <div>ニックネーム: <span id="acctNickname" style="color:#0ff;">-</span></div>
                             <div>メール: <span id="acctEmail" style="color:#0ff;">-</span></div>
                             <div>UID: <span id="acctUid" style="color:#888; font-size:10px;">-</span></div>
@@ -1723,10 +1845,12 @@
                         <p style="font-size: 11px; color: #aaa; margin-bottom: 12px; line-height: 1.4;">
                             メールアドレスを登録してデータをバックアップすることで、別の端末でも同じデータ（ランキング等）で遊ぶことができます。
                         </p>
-                        <button id="btnOpenAuthFromSettings" class="cyber-btn" style="width: 100%; margin-bottom: 12px;">
+                        <button id="btnOpenAuthFromSettings" class="cyber-btn"
+                            style="width: 100%; margin-bottom: 12px;">
                             データをバックアップする (登録)
                         </button>
-                        <button id="btnRestoreSettings" class="cyber-btn" style="width: 100%; margin-bottom: 12px; display: none;">
+                        <button id="btnRestoreSettings" class="cyber-btn"
+                            style="width: 100%; margin-bottom: 12px; display: none;">
                             クラウドから設定を復元
                         </button>
                         <button id="btnSignOutButton" class="cyber-btn btn-red" style="width: 100%; display: none;">
@@ -1778,7 +1902,8 @@
     <!-- スマホ用タッチUI -->
     <div id="touchUI">
         <div id="joystickArea"></div>
-        <div id="touchPanArea" style="position: absolute; right: 0; top: 0; width: 50%; height: 100%; pointer-events: auto;"></div>
+        <div id="touchPanArea"
+            style="position: absolute; right: 0; top: 0; width: 50%; height: 100%; pointer-events: auto;"></div>
         <div id="joystickBase">
             <div id="joystickNub"></div>
         </div>
@@ -1810,9 +1935,13 @@
             ランキングやマルチプレイで使用する名前を入力してください。
         </p>
         <input type="text" id="nicknameInput" maxlength="12" placeholder="コールサイン" />
-        <div id="nicknameErrorContainer" style="overflow: hidden; max-height: 0; transition: max-height 0.3s ease, opacity 0.3s; opacity: 0; margin-top: 4px; margin-bottom: 4px;">
-            <p id="nicknameErrorMessage" style="font-size: 13px; color: #ff0055; margin-bottom: 8px; line-height: 1.4; text-shadow: 0 0 5px rgba(255,0,85,0.5);">エラーメッセージ</p>
-            <button id="nicknameLoginBtn" class="cyber-btn btn-orange" style="font-size: 12px; padding: 6px 16px; display: none;">ログインして引き継ぐ</button>
+        <div id="nicknameErrorContainer"
+            style="overflow: hidden; max-height: 0; transition: max-height 0.3s ease, opacity 0.3s; opacity: 0; margin-top: 4px; margin-bottom: 4px;">
+            <p id="nicknameErrorMessage"
+                style="font-size: 13px; color: #ff0055; margin-bottom: 8px; line-height: 1.4; text-shadow: 0 0 5px rgba(255,0,85,0.5);">
+                エラーメッセージ</p>
+            <button id="nicknameLoginBtn" class="cyber-btn btn-orange"
+                style="font-size: 12px; padding: 6px 16px; display: none;">ログインして引き継ぐ</button>
         </div>
         <br />
         <button id="saveNicknameBtn" class="cyber-btn">システム起動</button>
@@ -2346,7 +2475,8 @@
 
     <div id="networkErrorModal" class="game-modal"
         style="display: none; border: 2px solid #ffff00; background: rgba(5,5,16,0.95); text-align: center;">
-        <h3 style="color: #ffff00; text-shadow: 0 0 15px #ffff00; font-size: 32px; margin-bottom: 5px;">NETWORK ERROR</h3>
+        <h3 style="color: #ffff00; text-shadow: 0 0 15px #ffff00; font-size: 32px; margin-bottom: 5px;">NETWORK ERROR
+        </h3>
         <p style="margin-bottom: 25px; font-size: 16px; color: #fff; line-height: 1.6;">
             通信エラーが発生しました。<br>スコアが正常に保存されなかった可能性があります。</p>
         <button id="closeNetworkErrorBtn" class="cyber-btn"
@@ -2367,10 +2497,13 @@
             <input type="email" id="authEmailInput" placeholder="pilot@astrofray.com" />
         </div>
         <div style="text-align: left; margin-bottom: 20px;">
-            <div style="font-size: 11px; color: #00f0ff; margin-bottom: 4px; letter-spacing: 1px;">PASSWORD <span style="color:#666;">(6文字以上)</span></div>
+            <div style="font-size: 11px; color: #00f0ff; margin-bottom: 4px; letter-spacing: 1px;">PASSWORD <span
+                    style="color:#666;">(6文字以上)</span></div>
             <input type="password" id="authPasswordInput" placeholder="••••••••" />
         </div>
-        <div id="authErrorMsg" style="color: #ff0055; font-size: 12px; margin-bottom: 12px; min-height: 16px; text-shadow: 0 0 5px #ff0055;"></div>
+        <div id="authErrorMsg"
+            style="color: #ff0055; font-size: 12px; margin-bottom: 12px; min-height: 16px; text-shadow: 0 0 5px #ff0055;">
+        </div>
 
         <div style="display: flex; justify-content: space-between;">
             <button id="btnCancelAuth" class="cyber-btn btn-red" style="width: 45%;">キャンセル</button>
@@ -2379,30 +2512,41 @@
     </div>
 
     <!-- データコンフリクト（競合）解決モーダル -->
-    <div id="dataConflictModal" class="game-modal" style="display: none; width: 480px; z-index: 2600; background: rgba(5,5,15,0.98); border: 2px solid #ffaa00;">
+    <div id="dataConflictModal" class="game-modal"
+        style="display: none; width: 480px; z-index: 2600; background: rgba(5,5,15,0.98); border: 2px solid #ffaa00;">
         <h3 style="color: #ffaa00; text-shadow: 0 0 15px #ffaa00;">DATA CONFLICT</h3>
         <p style="font-size: 13px; color: #fff; margin-bottom: 16px; line-height: 1.5;">
             ログイン先のアカウントにプレイデータが存在します。どちらのデータを使用（保持）するか選択してください。
         </p>
-        
+
         <div style="display: flex; justify-content: space-between; gap: 12px; margin-bottom: 16px;">
             <!-- 現在のデータ -->
-            <div id="conflictLocalData" style="flex: 1; padding: 12px; border: 1px dashed #00f0ff; background: rgba(0, 240, 255, 0.05); text-align: left; cursor: pointer; transition: all 0.2s;" class="conflict-card" data-choice="local">
+            <div id="conflictLocalData"
+                style="flex: 1; padding: 12px; border: 1px dashed #00f0ff; background: rgba(0, 240, 255, 0.05); text-align: left; cursor: pointer; transition: all 0.2s;"
+                class="conflict-card" data-choice="local">
                 <div style="font-weight: bold; color: #00f0ff; margin-bottom: 8px;">▶ 現在のプレイデータ</div>
-                <div style="font-size: 12px; color: #aaa;">ハイスコア: <span id="conflictLocalScore" style="color:#fff;">---</span></div>
-                <div style="font-size: 12px; color: #aaa;">プレイ時間: <span id="conflictLocalTime" style="color:#fff;">---</span>s</div>
+                <div style="font-size: 12px; color: #aaa;">ハイスコア: <span id="conflictLocalScore"
+                        style="color:#fff;">---</span></div>
+                <div style="font-size: 12px; color: #aaa;">プレイ時間: <span id="conflictLocalTime"
+                        style="color:#fff;">---</span>s</div>
             </div>
             <!-- クラウドのデータ -->
-            <div id="conflictCloudData" style="flex: 1; padding: 12px; border: 1px dashed #ff3355; background: rgba(255, 51, 85, 0.05); text-align: left; cursor: pointer; transition: all 0.2s;" class="conflict-card" data-choice="cloud">
+            <div id="conflictCloudData"
+                style="flex: 1; padding: 12px; border: 1px dashed #ff3355; background: rgba(255, 51, 85, 0.05); text-align: left; cursor: pointer; transition: all 0.2s;"
+                class="conflict-card" data-choice="cloud">
                 <div style="font-weight: bold; color: #ff3355; margin-bottom: 8px;">▶ クラウドのデータ</div>
-                <div style="font-size: 12px; color: #aaa;">ハイスコア: <span id="conflictCloudScore" style="color:#fff;">---</span></div>
-                <div style="font-size: 12px; color: #aaa;">プレイ時間: <span id="conflictCloudTime" style="color:#fff;">---</span>s</div>
+                <div style="font-size: 12px; color: #aaa;">ハイスコア: <span id="conflictCloudScore"
+                        style="color:#fff;">---</span></div>
+                <div style="font-size: 12px; color: #aaa;">プレイ時間: <span id="conflictCloudTime"
+                        style="color:#fff;">---</span>s</div>
             </div>
         </div>
 
-        <button id="btnConfirmConflict" class="cyber-btn btn-orange" style="width: 100%; padding: 10px; font-size: 14px;" disabled>選択したデータで引き継ぐ</button>
+        <button id="btnConfirmConflict" class="cyber-btn btn-orange"
+            style="width: 100%; padding: 10px; font-size: 14px;" disabled>選択したデータで引き継ぐ</button>
         <div style="margin-top: 10px; text-align: center;">
-            <button id="btnCancelConflict" class="cyber-btn" style="padding: 4px 12px; font-size: 11px;">キャンセルして戻る</button>
+            <button id="btnCancelConflict" class="cyber-btn"
+                style="padding: 4px 12px; font-size: 11px;">キャンセルして戻る</button>
         </div>
     </div>
 
@@ -2412,7 +2556,8 @@
             <h3 id="gameAlertTitle" style="font-size: 18px;">NOTICE</h3>
             <p id="gameAlertMessage" style="font-size: 13px; line-height: 1.6; white-space: pre-wrap;"></p>
             <div class="alert-btn-row">
-                <button id="gameAlertCancelBtn" class="cyber-btn btn-red" style="display: none; min-width: 100px;">キャンセル</button>
+                <button id="gameAlertCancelBtn" class="cyber-btn btn-red"
+                    style="display: none; min-width: 100px;">キャンセル</button>
                 <button id="gameAlertOkBtn" class="cyber-btn" style="min-width: 120px;">OK</button>
             </div>
         </div>
@@ -2439,12 +2584,12 @@
             onSnapshot,
             deleteDoc,
         } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
-        import { 
-            getAuth, 
-            signInAnonymously, 
-            onAuthStateChanged, 
-            createUserWithEmailAndPassword, 
-            signInWithEmailAndPassword, 
+        import {
+            getAuth,
+            signInAnonymously,
+            onAuthStateChanged,
+            createUserWithEmailAndPassword,
+            signInWithEmailAndPassword,
             signOut,
             linkWithCredential,
             EmailAuthProvider
@@ -2473,7 +2618,7 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         const auth = getAuth(app);
-        
+
         window.firebaseDb = db;
         window.firebaseAuth = auth;
         window.firebaseAuthUI = {
@@ -2485,7 +2630,7 @@
             linkWithCredential,
             EmailAuthProvider
         };
-        
+
         // Photon等から環境情報を参照できるようにグローバルスコープへ露出
         window.currentFirebaseProjectId = firebaseConfig.projectId;
         function normalizeToNumber(v) {
@@ -2505,6 +2650,17 @@
                 : "https://astro-fray-dev.astro-fray-server.workers.dev";
         }
         window._getWorkerBaseUrl = _getWorkerBaseUrl;
+
+        // Firestore タイムアウト用ユーティリティ (7秒)
+        async function withTimeout(promise, ms = 7000) {
+            let timeoutId;
+            const timeoutPromise = new Promise((_, reject) => {
+                timeoutId = setTimeout(() => {
+                    reject(new Error("Firebase query timed out"));
+                }, ms);
+            });
+            return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
+        }
 
         async function submitScoreToServer(rawScore, difficulty, playTimeSeconds, sessionToken) {
             const finalScore = normalizeToNumber(rawScore) || 0;
@@ -2560,16 +2716,16 @@
 
             const colRef = collection(db, colName);
             let q = query(colRef, where("uid", "==", currentUid), limit(1));
-            
+
             try {
-                let querySnapshot = await getDocs(q);
+                let querySnapshot = await withTimeout(getDocs(q));
                 if (querySnapshot.empty) {
                     q = query(colRef, where("name", "==", name), limit(1));
-                    querySnapshot = await getDocs(q);
+                    querySnapshot = await withTimeout(getDocs(q));
                 }
 
                 if (querySnapshot.empty) {
-                    await addDoc(colRef, {
+                    await withTimeout(addDoc(colRef, {
                         name,
                         score: finalScore,
                         playTimeSeconds: pTime,
@@ -2577,23 +2733,23 @@
                         createdAt: serverTimestamp(),
                         uid: currentUid,
                         isAnonymous: auth.currentUser ? auth.currentUser.isAnonymous : true
-                    });
+                    }));
                 } else {
                     const existingDoc = querySnapshot.docs[0];
                     const existingScore = existingDoc.data().score || 0;
                     if (finalScore > existingScore) {
-                        await updateDoc(doc(db, colName, existingDoc.id), {
+                        await withTimeout(updateDoc(doc(db, colName, existingDoc.id), {
                             name, score: finalScore, playTimeSeconds: pTime,
                             uid: currentUid,
                             isAnonymous: auth.currentUser ? auth.currentUser.isAnonymous : true
-                        });
+                        }));
                     } else {
-                        await updateDoc(doc(db, colName, existingDoc.id), {
+                        await withTimeout(updateDoc(doc(db, colName, existingDoc.id), {
                             name, uid: currentUid,
                             score: existingDoc.data().score || 0,
                             playTimeSeconds: existingDoc.data().playTimeSeconds || 0,
                             isAnonymous: auth.currentUser ? auth.currentUser.isAnonymous : true
-                        });
+                        }));
                     }
                 }
                 return { ok: true };
@@ -2602,35 +2758,35 @@
                 return { ok: false, reason: err.code };
             }
         }
-        
-        window.getPersonalHighScoreAndData = async function(uid, diff = "normal") {
+
+        window.getPersonalHighScoreAndData = async function (uid, diff = "normal") {
             const colName = diff === "easy" ? "rankings_easy" : diff === "hard" ? "rankings_hard" : "rankings";
             try {
                 const colRef = collection(db, colName);
                 const q = query(colRef, where("uid", "==", uid), limit(1));
-                const snap = await getDocs(q);
+                const snap = await withTimeout(getDocs(q));
                 if (!snap.empty) {
                     return snap.docs[0].data();
                 }
-            } catch(e) {}
+            } catch (e) { }
             return null;
         };
 
 
-        window.checkNicknameUnique = async function(name, currentUid) {
+        window.checkNicknameUnique = async function (name, currentUid) {
             // Check cross all rankings if any other uid is using this name
             for (let diff of ["easy", "normal", "hard"]) {
                 const colName = diff === "easy" ? "rankings_easy" : diff === "hard" ? "rankings_hard" : "rankings";
                 const q = query(collection(db, colName), where("name", "==", name), limit(10));
-                const snap = await getDocs(q);
+                const snap = await withTimeout(getDocs(q));
                 for (let docSnap of snap.docs) {
                     const data = docSnap.data();
                     if (data.uid && data.uid !== currentUid) {
-                        return { unique: false, ownerIsAnonymous: data.isAnonymous === true }; 
+                        return { unique: false, ownerIsAnonymous: data.isAnonymous === true };
                     }
                 }
             }
-            return { unique: true }; 
+            return { unique: true };
         };
         async function fetchTopRanks(difficulty) {
             const diff = difficulty || "normal";
@@ -2643,7 +2799,7 @@
             try {
                 const colRef = collection(db, colName);
                 const q = query(colRef, orderBy("score", "desc"), limit(100));
-                const snap = await getDocs(q);
+                const snap = await withTimeout(getDocs(q));
                 const all = snap.docs.map((d) => {
                     const data = d.data();
                     return {
@@ -2675,26 +2831,26 @@
         window.fetchTopRanks = fetchTopRanks;
 
         // ======== 設定のクラウド保存・復元 ========
-        window.saveSettingsToCloud = async function(settings) {
+        window.saveSettingsToCloud = async function (settings) {
             if (!auth.currentUser || auth.currentUser.isAnonymous) return;
             try {
                 const uid = auth.currentUser.uid;
                 const docRef = doc(db, 'user_settings', uid);
-                await setDoc(docRef, {
+                await withTimeout(setDoc(docRef, {
                     ...settings,
                     updatedAt: serverTimestamp()
-                }, { merge: true });
+                }, { merge: true }));
             } catch (e) {
                 console.warn('Settings cloud save failed:', e);
             }
         };
 
-        window.restoreSettingsFromCloud = async function() {
+        window.restoreSettingsFromCloud = async function () {
             if (!auth.currentUser || auth.currentUser.isAnonymous) return null;
             try {
                 const uid = auth.currentUser.uid;
                 const docRef = doc(db, 'user_settings', uid);
-                const snap = await getDoc(docRef);
+                const snap = await withTimeout(getDoc(docRef));
                 if (snap.exists()) {
                     const data = snap.data();
                     delete data.updatedAt; // タイムスタンプは設定に含めない
@@ -2732,12 +2888,12 @@
 
         window.updateFirestoreRoomStatus = async function (docId) {
             try {
-                await updateDoc(doc(db, "match_rooms", docId), { status: "playing" });
+                await withTimeout(updateDoc(doc(db, "match_rooms", docId), { status: "playing" }));
             } catch (e) { }
         };
         window.deleteFirestoreRoom = async function (docId) {
             try {
-                await deleteDoc(doc(db, "match_rooms", docId));
+                await withTimeout(deleteDoc(doc(db, "match_rooms", docId)));
             } catch (e) { }
         };
 
@@ -2779,12 +2935,12 @@
                     localStorage.getItem("playerNickname_v1") || "UNKNOWN";
                 if (!hostName) hostName = storedName + "のルーム";
 
-                const docRef = await addDoc(collection(db, "match_rooms"), {
+                const docRef = await withTimeout(addDoc(collection(db, "match_rooms"), {
                     roomId,
                     hostName,
                     status: "waiting",
                     createdAt: serverTimestamp(),
-                });
+                }));
                 window.currentRoomDocId = docRef.id;
 
                 // Cleanup Modal State
@@ -2820,17 +2976,20 @@
         <div id="leSafeAreaGuide" style="position:absolute; pointer-events:none;
             border: 1px dashed rgba(255,200,0,0.3); box-sizing:border-box; display:none;"></div>
         <!-- ドラッグコンテナ (全画面) -->
-        <div id="layoutEditorCanvas" style="position:absolute; top:0; left:0; width:100%; height:100%; overflow:visible;"></div>
+        <div id="layoutEditorCanvas"
+            style="position:absolute; top:0; left:0; width:100%; height:100%; overflow:visible;"></div>
         <!-- ヘッダー -->
         <div style="position:absolute; top:0; left:0; width:100%; padding:8px 16px; box-sizing:border-box;
             display:flex; justify-content:space-between; align-items:center;
             background:linear-gradient(180deg, rgba(0,10,30,0.9) 0%, transparent 100%); pointer-events:none;">
-            <span style="color:#00f0ff; font-size:13px; font-weight:bold; text-shadow:0 0 8px rgba(0,240,255,0.5); pointer-events:none;">
+            <span
+                style="color:#00f0ff; font-size:13px; font-weight:bold; text-shadow:0 0 8px rgba(0,240,255,0.5); pointer-events:none;">
                 ⬡ UI LAYOUT EDITOR</span>
             <span style="color:rgba(255,255,255,0.4); font-size:11px; pointer-events:none;">ドラッグで移動 / 下部でサイズ変更</span>
         </div>
         <!-- フローティングUI (上部中央に配置) -->
-        <div style="position:absolute; top:20px; left:50%; transform:translateX(-50%); display:flex; gap:8px; z-index:10;
+        <div
+            style="position:absolute; top:20px; left:50%; transform:translateX(-50%); display:flex; gap:8px; z-index:10;
             background:rgba(0,10,30,0.8); padding:8px 12px; border-radius:8px; border:1px solid rgba(0,240,255,0.4); box-shadow: 0 4px 15px rgba(0,0,0,0.5);">
             <button id="leBtnResetItem" class="cyber-btn" disabled
                 style="padding:6px 10px; font-size:11px; border-radius:3px; box-shadow:0 0 10px rgba(0,240,255,0.2);">選択リセット</button>
@@ -2845,7 +3004,8 @@
 
         <!-- 選択名表示 (ヘッダーの下あたりに独立表示) -->
         <div style="position:absolute; top:42px; left:16px; pointer-events:none; z-index:10;">
-            <span id="leSelectedName" style="color:#0f0; font-size:12px; font-weight:bold; text-shadow:0 0 5px #0f0; background:rgba(0,0,0,0.5); padding:2px 6px; border-radius:3px;">
+            <span id="leSelectedName"
+                style="color:#0f0; font-size:12px; font-weight:bold; text-shadow:0 0 5px #0f0; background:rgba(0,0,0,0.5); padding:2px 6px; border-radius:3px;">
                 ★ 未選択 (長押し/右クリックでサイズ変更)</span>
         </div>
 

@@ -1265,7 +1265,7 @@ let keys = {};
 let mouse = { x: 0, y: 0, movementX: 0, movementY: 0, down: false };
 let bindingAction = null;
 
-const GAME_VERSION = "1.5.3";
+const GAME_VERSION = "1.6.0";
 let running = false,
     showHelp = false;
 let isPaused = false;
@@ -7390,13 +7390,23 @@ function initFirebaseAuthUI() {
         
         // 隠していた画面を元に戻す
         const viewsToHide = ["modeSelectModal", "pauseSettingsMenu", "startScreen"];
+        let restoredAny = false;
         viewsToHide.forEach(id => {
             const el = document.getElementById(id);
             if (el && el.dataset.hiddenByAuth === "true") {
                 el.style.display = id === "startScreen" ? "flex" : "block";
                 delete el.dataset.hiddenByAuth;
+                restoredAny = true;
             }
         });
+
+        // 何も復元されなかった場合（例: ニックネーム画面からログインに飛んだ場合など）はモード選択を出す
+        if (!restoredAny) {
+            const modeSelect = document.getElementById("modeSelectModal");
+            if (modeSelect && (!running || isPaused)) {
+                modeSelect.style.display = "block";
+            }
+        }
     }
 
     btnCancelAuth.addEventListener("click", () => {

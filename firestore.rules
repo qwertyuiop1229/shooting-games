@@ -51,6 +51,11 @@ service cloud.firestore {
       allow update, delete: if request.auth != null;
     }
 
+    // ===== ユーザー設定（本人のみ読み書き可） =====
+    match /user_settings/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
     // デフォルト: それ以外のコレクションは全て拒否
     match /{document=**} {
       allow read, write: if false;

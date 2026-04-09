@@ -111,6 +111,29 @@ function saveAudioSettings(sfxVol, bgmVol, boostSoundFlag, warpBassFlag) {
             warpBass: warpBassFlag,
         }),
     );
+    debouncedCloudSync();
+}
+
+// 設定のクラウド同期（デバウンス: 2秒待ってから送信）
+let _cloudSyncTimer = null;
+function debouncedCloudSync() {
+    if (_cloudSyncTimer) clearTimeout(_cloudSyncTimer);
+    _cloudSyncTimer = setTimeout(() => {
+        if (window.saveSettingsToCloud) {
+            window.saveSettingsToCloud(collectAllSettings());
+        }
+    }, 2000);
+}
+function collectAllSettings() {
+    const features = loadFeatureSettings();
+    const audio = loadAudioSettings();
+    return {
+        features,
+        audio,
+        lightweight: localStorage.getItem('lightweight_v1') === '1',
+        simpleTransition: localStorage.getItem('simpleTransition_v1') === '1',
+        nickname: localStorage.getItem('playerNickname_v1') || 'UNKNOWN',
+    };
 }
 let audioSettings = loadAudioSettings();
 
@@ -577,7 +600,16 @@ function screenFadeIn(duration, delay) {
 }
 
 // 超光速ワームホール（ハイパースペース）トランジション
+let simpleTransition = localStorage.getItem('simpleTransition_v1') === '1';
 function playWarpTransition(callback) {
+    // シンプル画面遷移モード: ワープアニメーションをスキップ
+    if (simpleTransition) {
+        screenFadeOut(800, "#050510", () => {
+            if (callback) callback();
+            screenFadeIn(800, 200);
+        });
+        return;
+    }
     const overlay = document.getElementById("warpTransitionOverlay");
     const canvas = document.getElementById("warpStarCanvas");
     if (!overlay || !canvas) {
@@ -967,6 +999,13 @@ function applyLightweightMode(en) {
     } catch (e) { }
     resize();
     starCacheNeedsRegen = true;
+    // 軽量化モードON→シンプル画面遷移もON
+    if (lightweightMode && !simpleTransition) {
+        simpleTransition = true;
+        localStorage.setItem('simpleTransition_v1', '1');
+        const stEl = document.getElementById('toggleSimpleTransition');
+        if (stEl) setToggleElem(stEl, true);
+    }
 }
 const DEFAULT_FEATURES = {
     stars: true,
@@ -993,6 +1032,7 @@ function saveFeatureSettings(obj) {
     try {
         localStorage.setItem("featureSettings_v1", JSON.stringify(obj));
     } catch (e) { }
+    debouncedCloudSync();
 }
 let featureSettings = loadFeatureSettings();
 let showStars = !!featureSettings.stars;
@@ -1191,7 +1231,7 @@ let powerups = [];
 
 /* ========== ゲーム状態 ========== */
 const canvas = document.getElementById("game");
-const ctx = canvas.getContext("2d", { alpha: false });
+const ctx = canvas.getContext("2d", { alpha: false, willReadFrequently: true });
 let dpr = Math.max(1, window.devicePixelRatio || 1);
 function resize() {
     dpr = DPR_FORCE_ONE ? 1 : Math.max(1, window.devicePixelRatio || 1);
@@ -1214,7 +1254,7 @@ let keys = {};
 let mouse = { x: 0, y: 0, movementX: 0, movementY: 0, down: false };
 let bindingAction = null;
 
-const GAME_VERSION = "1.4.17";
+const GAME_VERSION = "1.4.23";
 let running = false,
     showHelp = false;
 let isPaused = false;
@@ -5514,6 +5554,22 @@ document
 document
     .getElementById("btnLeaveSingleplayer")
     ?.addEventListener("click", async () => {
+        // ゲーム中（ゲームオーバーでない）なら確認ダイアログ
+        if (running && !gameOverMode && !window.isMultiplayer) {
+            // ポーズメニューを一時非表示にしてダイアログを見せる
+            const pauseMenu = document.getElementById("pauseSettingsMenu");
+            const wasVisible = pauseMenu.style.display !== "none";
+            if (wasVisible) pauseMenu.style.display = "none";
+            const confirmed = await window.gameConfirm(
+                "ゲームを終了しますか？\n現在のスコアはランキングに登録されません。"
+            );
+            if (!confirmed) {
+                if (wasVisible) pauseMenu.style.display = "block";
+                return;
+            }
+        }
+        // セッショントークンを無効化
+        _currentSessionToken = null;
         // 画面フェードアウト → モードセレクトへ
         if (typeof window.playTitleBGM === "function") window.playTitleBGM();
         screenFadeOut(1200, "#050510", () => {
@@ -5867,6 +5923,17 @@ lightweightToggle?.addEventListener("keydown", (e) => {
         applyFeatureSettingsToRuntime();
     }
 });
+
+// シンプル画面遷移トグル
+const toggleSimpleTransition = document.getElementById('toggleSimpleTransition');
+if (toggleSimpleTransition) {
+    setToggleElem(toggleSimpleTransition, simpleTransition);
+    wireToggle(toggleSimpleTransition, () => simpleTransition, (v) => {
+        simpleTransition = v;
+        localStorage.setItem('simpleTransition_v1', v ? '1' : '0');
+        setToggleElem(toggleSimpleTransition, v);
+    });
+}
 
 damageTextSizeSlider?.addEventListener("input", (e) => {
     featureSettings.damageTextSize = parseInt(e.target.value);
@@ -7086,6 +7153,12 @@ function initFirebaseAuthUI() {
     }
 
     function updateAccountUI(user) {
+        const detailSection = document.getElementById('accountDetailSection');
+        const acctNickname = document.getElementById('acctNickname');
+        const acctEmail = document.getElementById('acctEmail');
+        const acctUid = document.getElementById('acctUid');
+        const restoreBtn = document.getElementById('btnRestoreSettings');
+
         if (!user) {
             if (accountStatusText) {
                 accountStatusText.innerText = "OFFLINE";
@@ -7093,6 +7166,8 @@ function initFirebaseAuthUI() {
             }
             if (btnOpenAuthFromSettings) btnOpenAuthFromSettings.style.display = "block";
             if (btnSignOutButton) btnSignOutButton.style.display = "none";
+            if (restoreBtn) restoreBtn.style.display = "none";
+            if (detailSection) detailSection.style.display = "none";
             return;
         }
         isGuest = user.isAnonymous;
@@ -7104,14 +7179,24 @@ function initFirebaseAuthUI() {
             }
             if (btnOpenAuthFromSettings) btnOpenAuthFromSettings.style.display = "block";
             if (btnSignOutButton) btnSignOutButton.style.display = "none";
+            if (restoreBtn) restoreBtn.style.display = "none";
+            if (detailSection) detailSection.style.display = "none";
         } else {
             if (accountStatusText) {
-                accountStatusText.innerText = "LINKED (" + user.email + ")";
+                accountStatusText.innerText = "LINKED";
                 accountStatusText.style.color = "#00f0ff";
                 accountStatusText.style.textShadow = "0 0 10px #00f0ff";
             }
             if (btnOpenAuthFromSettings) btnOpenAuthFromSettings.style.display = "none";
             if (btnSignOutButton) btnSignOutButton.style.display = "block";
+            if (restoreBtn) restoreBtn.style.display = "block";
+            // アカウント詳細表示
+            if (detailSection) {
+                detailSection.style.display = "block";
+                if (acctNickname) acctNickname.textContent = localStorage.getItem('playerNickname_v1') || 'UNKNOWN';
+                if (acctEmail) acctEmail.textContent = user.email || '-';
+                if (acctUid) acctUid.textContent = user.uid.substring(0, 12) + '...';
+            }
         }
     }
 
@@ -7158,6 +7243,34 @@ function initFirebaseAuthUI() {
             document.getElementById("pauseSettingsMenu").style.display = "none";
             window.location.reload();
         }
+    });
+
+    // クラウドから設定を復元
+    document.getElementById("btnRestoreSettings")?.addEventListener("click", async () => {
+        if (!window.restoreSettingsFromCloud) return;
+        const cloudData = await window.restoreSettingsFromCloud();
+        if (!cloudData) {
+            await window.gameAlert("クラウドに保存された設定がありません。", "RESTORE");
+            return;
+        }
+        // ローカルストレージに書き戻し
+        if (cloudData.features) {
+            localStorage.setItem("featureSettings_v1", JSON.stringify(cloudData.features));
+        }
+        if (cloudData.audio) {
+            localStorage.setItem("audioSettings_v1", JSON.stringify(cloudData.audio));
+        }
+        if (cloudData.lightweight !== undefined) {
+            localStorage.setItem("lightweight_v1", cloudData.lightweight ? "1" : "0");
+        }
+        if (cloudData.simpleTransition !== undefined) {
+            localStorage.setItem("simpleTransition_v1", cloudData.simpleTransition ? "1" : "0");
+        }
+        if (cloudData.nickname) {
+            localStorage.setItem("playerNickname_v1", cloudData.nickname);
+        }
+        await window.gameAlert("クラウドから設定を復元しました。\nページを再読み込みして反映します。", "RESTORE");
+        window.location.reload();
     });
 
     function hideAuthModal() {

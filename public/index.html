@@ -1532,7 +1532,7 @@
                 <!-- ===== DISPLAY タブ ===== -->
                 <div class="settings-tab-content tab-visible" data-tab-content="display">
                     <div class="settings-container">
-                        <div class="settings-section-header">ビジュアル</div>
+                        <div class="settings-section-header">ビジュアルエフェクト</div>
                         <div class="setting-row">
                             <div>エフェクト一括</div>
                             <div id="toggleAll" class="toggle" role="switch" aria-checked="true" tabindex="0">
@@ -1568,7 +1568,7 @@
                             <input type="range" id="damageTextSizeSlider" min="10" max="60" step="1" value="24" />
                         </div>
 
-                        <div class="settings-section-header">ミニマップ・照準</div>
+                        <div class="settings-section-header">ＨＵＤ</div>
                         <div class="setting-row">
                             <div>照準ライン表示</div>
                             <div id="toggleAimLine" class="toggle" role="switch" aria-checked="false" tabindex="0">
@@ -1593,6 +1593,12 @@
                         <div class="setting-row">
                             <div>パフォーマンスモード</div>
                             <div id="lightweightToggle" class="toggle" role="switch" aria-checked="false" tabindex="0">
+                                <div class="knob"></div>
+                            </div>
+                        </div>
+                        <div class="setting-row">
+                            <div>シンプル画面遷移</div>
+                            <div id="toggleSimpleTransition" class="toggle" role="switch" aria-checked="false" tabindex="0">
                                 <div class="knob"></div>
                             </div>
                         </div>
@@ -1705,15 +1711,23 @@
                 <!-- ===== ACCOUNT タブ ===== -->
                 <div class="settings-tab-content" data-tab-content="account">
                     <div class="settings-container">
-                        <div style="text-align: center; margin-bottom: 20px;">
-                            <div style="font-size: 11px; color: #aaa; margin-bottom: 4px;">現在のアカウント状態</div>
+                        <div style="text-align: center; margin-bottom: 16px;">
+                            <div style="font-size: 11px; color: #aaa; margin-bottom: 4px;">ステータス</div>
                             <div id="accountStatusText" style="font-size: 16px; color: #0f0; letter-spacing: 1px; font-weight: bold; text-shadow: 0 0 10px #0f0;">GUEST (未連携)</div>
+                        </div>
+                        <div id="accountDetailSection" style="display:none; text-align:left; font-size:12px; color:#aac; margin-bottom:14px; line-height:1.8; border:1px solid rgba(0,240,255,0.15); border-radius:4px; padding:10px;">
+                            <div>ニックネーム: <span id="acctNickname" style="color:#0ff;">-</span></div>
+                            <div>メール: <span id="acctEmail" style="color:#0ff;">-</span></div>
+                            <div>UID: <span id="acctUid" style="color:#888; font-size:10px;">-</span></div>
                         </div>
                         <p style="font-size: 11px; color: #aaa; margin-bottom: 12px; line-height: 1.4;">
                             メールアドレスを登録してデータをバックアップすることで、別の端末でも同じデータ（ランキング等）で遊ぶことができます。
                         </p>
                         <button id="btnOpenAuthFromSettings" class="cyber-btn" style="width: 100%; margin-bottom: 12px;">
                             データをバックアップする (登録)
+                        </button>
+                        <button id="btnRestoreSettings" class="cyber-btn" style="width: 100%; margin-bottom: 12px; display: none;">
+                            クラウドから設定を復元
                         </button>
                         <button id="btnSignOutButton" class="cyber-btn btn-red" style="width: 100%; display: none;">
                             サインアウト
@@ -2420,6 +2434,8 @@
             where,
             updateDoc,
             doc,
+            getDoc,
+            setDoc,
             onSnapshot,
             deleteDoc,
         } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
@@ -2657,6 +2673,38 @@
         }
         window.submitScoreToServer = submitScoreToServer;
         window.fetchTopRanks = fetchTopRanks;
+
+        // ======== 設定のクラウド保存・復元 ========
+        window.saveSettingsToCloud = async function(settings) {
+            if (!auth.currentUser || auth.currentUser.isAnonymous) return;
+            try {
+                const uid = auth.currentUser.uid;
+                const docRef = doc(db, 'user_settings', uid);
+                await setDoc(docRef, {
+                    ...settings,
+                    updatedAt: serverTimestamp()
+                }, { merge: true });
+            } catch (e) {
+                console.warn('Settings cloud save failed:', e);
+            }
+        };
+
+        window.restoreSettingsFromCloud = async function() {
+            if (!auth.currentUser || auth.currentUser.isAnonymous) return null;
+            try {
+                const uid = auth.currentUser.uid;
+                const docRef = doc(db, 'user_settings', uid);
+                const snap = await getDoc(docRef);
+                if (snap.exists()) {
+                    const data = snap.data();
+                    delete data.updatedAt; // タイムスタンプは設定に含めない
+                    return data;
+                }
+            } catch (e) {
+                console.warn('Settings cloud restore failed:', e);
+            }
+            return null;
+        };
 
         window.subscribeRooms = function () {
             const q = query(

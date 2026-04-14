@@ -1265,7 +1265,7 @@ let keys = {};
 let mouse = { x: 0, y: 0, movementX: 0, movementY: 0, down: false };
 let bindingAction = null;
 
-const GAME_VERSION = "1.6.0";
+const GAME_VERSION = "1.12.0";
 let running = false,
     showHelp = false;
 let isPaused = false;
@@ -6030,7 +6030,7 @@ saveNicknameBtn?.addEventListener("click", async () => {
                     const errMsg = document.getElementById("nicknameErrorMessage");
                     const loginBtn = document.getElementById("nicknameLoginBtn");
                     
-                    if (isAnon && !result.ownerIsAnonymous) {
+                    if (isAnon) {
                         errMsg.style.color = "#ffaa00"; 
                         errMsg.style.textShadow = "0 0 5px rgba(255,170,0,0.5)";
                         errMsg.innerText = "このコールサインは登録済みです。\nあなたのデータですか？";
@@ -6070,6 +6070,11 @@ saveNicknameBtn?.addEventListener("click", async () => {
         saveNicknameBtn.innerText = "システム起動";
 
         localStorage.setItem("playerNickname_v1", name);
+        
+        if (window.submitScoreToServer) {
+            window.submitScoreToServer(0, "normal", 0, null).catch(e => console.warn(e));
+        }
+
         nicknameModal.style.display = "none";
         if (!gameOverMode) {
             document.getElementById("modeSelectModal").style.display = "block";

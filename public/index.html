@@ -2651,6 +2651,25 @@
         }
         window._getWorkerBaseUrl = _getWorkerBaseUrl;
 
+        // 管理者アクセスの判定（URLの末尾が #dev ならカウント対象外）
+        const isAdminAccess = window.location.hash === '#dev';
+
+        // 新規訪問者のカウント (一度でも訪れたらlocalStorageにフラグを立ててカウントしない)
+        if (!localStorage.getItem("site_visited_v1")) {
+            localStorage.setItem("site_visited_v1", "true");
+            
+            // 管理者でない場合のみサーバーへカウント送信
+            if (!isAdminAccess) {
+                try {
+                    fetch(_getWorkerBaseUrl() + '/api/track-visit', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({})
+                    }).catch(e => {}); // エラーは無視（ゲーム進行に影響を与えないため）
+                } catch (e) {}
+            }
+        }
+
         // Firestore タイムアウト用ユーティリティ (7秒)
         async function withTimeout(promise, ms = 7000) {
             let timeoutId;
@@ -2781,8 +2800,10 @@
                 const snap = await withTimeout(getDocs(q));
                 for (let docSnap of snap.docs) {
                     const data = docSnap.data();
-                    if (data.uid && data.uid !== currentUid) {
-                        return { unique: false, ownerIsAnonymous: data.isAnonymous === true };
+                    const isMine = data.uid && data.uid === currentUid;
+                    if (!isMine) {
+                        const isAnon = ('isAnonymous' in data) ? (data.isAnonymous === true) : true;
+                        return { unique: false, ownerIsAnonymous: isAnon };
                     }
                 }
             }

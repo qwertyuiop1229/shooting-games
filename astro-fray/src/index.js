@@ -369,29 +369,50 @@ export default {
 			const authHeader = request.headers.get('Authorization') || '';
 			const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : body.token;
 
-			if (!idToken) {
-				return new Response(JSON.stringify({ success: false, error: 'Missing token' }), {
-					status: 401, headers: jsonHeaders
-				});
-			}
-
-			// IDトークン検証
-			let callerUid;
-			try {
-				const decoded = decodeAndVerifyIdToken(idToken);
-				callerUid = decoded.uid;
-			} catch (e) {
-				return new Response(JSON.stringify({ success: false, error: 'Invalid token', details: e.message }), {
-					status: 401, headers: jsonHeaders
-				});
-			}
-
 			const rankingCollections = ['rankings', 'rankings_easy', 'rankings_hard'];
+
+			// ==========================================
+			// API 0: 訪問者カウンター（ユニーク訪問）
+			// ==========================================
+			if (url.pathname === '/api/track-visit') {
+				const getUrl = 'https://firestore.googleapis.com/v1/projects/' + projectId + '/databases/(default)/documents/site_stats/counters';
+				let getResp = await fetch(getUrl, { headers: { 'Authorization': 'Bearer ' + accessToken } });
+				let currentCount = 0;
+				if (getResp.ok) {
+					const docData = await getResp.json();
+					currentCount = parseInt(docData.fields?.visitors?.integerValue || docData.fields?.visitors?.doubleValue || 0);
+				}
+				await updateDocument(accessToken, 'projects/' + projectId + '/databases/(default)/documents/site_stats/counters', { visitors: currentCount + 1 });
+				
+				return new Response(JSON.stringify({ success: true }), {
+					status: 200, headers: jsonHeaders
+				});
+			}
 
 			// ==========================================
 			// API 1: 古いデータの削除（Auth + Firestore）
 			// ==========================================
 			if (url.pathname === '/api/delete-anonymous') {
+				if (!idToken) {
+					return new Response(JSON.stringify({ success: false, error: 'Missing token' }), {
+						status: 401, headers: jsonHeaders
+					});
+				}
+
+				// IDトークン検証
+				let callerUid;
+				let isCallerAnonymous = true;
+				try {
+					const decoded = decodeAndVerifyIdToken(idToken);
+					callerUid = decoded.uid;
+					if (decoded.payload && decoded.payload.firebase && decoded.payload.firebase.sign_in_provider !== 'anonymous') {
+						isCallerAnonymous = false;
+					}
+				} catch (e) {
+					return new Response(JSON.stringify({ success: false, error: 'Invalid token', details: e.message }), {
+						status: 401, headers: jsonHeaders
+					});
+				}
 				const oldUid = body.oldUid;
 				if (!oldUid) {
 					return new Response(JSON.stringify({ success: false, error: 'Missing oldUid' }), {
@@ -453,6 +474,21 @@ export default {
 			// API 2: データ移行のみ
 			// ==========================================
 			if (url.pathname === '/api/migrate-data') {
+				if (!idToken) {
+					return new Response(JSON.stringify({ success: false, error: 'Missing token' }), {
+						status: 401, headers: jsonHeaders
+					});
+				}
+
+				let callerUid;
+				try {
+					const decoded = decodeAndVerifyIdToken(idToken);
+					callerUid = decoded.uid;
+				} catch (e) {
+					return new Response(JSON.stringify({ success: false, error: 'Invalid token', details: e.message }), {
+						status: 401, headers: jsonHeaders
+					});
+				}
 				const oldUid = body.oldUid;
 				const migrateAction = body.migrateAction;
 
@@ -525,6 +561,21 @@ export default {
 			// レガシーAPI（後方互換）
 			// ==========================================
 			if (url.pathname === '/api/cleanup-anonymous' || url.pathname === '/api/migrate-and-cleanup') {
+				if (!idToken) {
+					return new Response(JSON.stringify({ success: false, error: 'Missing token' }), {
+						status: 401, headers: jsonHeaders
+					});
+				}
+
+				let callerUid;
+				try {
+					const decoded = decodeAndVerifyIdToken(idToken);
+					callerUid = decoded.uid;
+				} catch (e) {
+					return new Response(JSON.stringify({ success: false, error: 'Invalid token', details: e.message }), {
+						status: 401, headers: jsonHeaders
+					});
+				}
 				const oldUid = body.oldUid;
 				const migrateAction = body.migrateAction || 'cloud';
 				const targetUid = oldUid || callerUid;
@@ -588,6 +639,21 @@ export default {
 			// API 3: ゲームセッション開始
 			// ==========================================
 			if (url.pathname === '/api/start-session') {
+				if (!idToken) {
+					return new Response(JSON.stringify({ success: false, error: 'Missing token' }), {
+						status: 401, headers: jsonHeaders
+					});
+				}
+
+				let callerUid;
+				try {
+					const decoded = decodeAndVerifyIdToken(idToken);
+					callerUid = decoded.uid;
+				} catch (e) {
+					return new Response(JSON.stringify({ success: false, error: 'Invalid token', details: e.message }), {
+						status: 401, headers: jsonHeaders
+					});
+				}
 				const difficulty = body.difficulty || 'normal';
 				const key = await getHmacKey(serviceAccount);
 				const sessionToken = await createSessionToken(key, callerUid, difficulty);
@@ -601,6 +667,25 @@ export default {
 			// API 4: スコア送信（サーバーサイド検証）
 			// ==========================================
 			if (url.pathname === '/api/submit-score') {
+				if (!idToken) {
+					return new Response(JSON.stringify({ success: false, error: 'Missing token' }), {
+						status: 401, headers: jsonHeaders
+					});
+				}
+
+				let callerUid;
+				let isCallerAnonymous = true;
+				try {
+					const decoded = decodeAndVerifyIdToken(idToken);
+					callerUid = decoded.uid;
+					if (decoded.payload && decoded.payload.firebase && decoded.payload.firebase.sign_in_provider !== 'anonymous') {
+						isCallerAnonymous = false;
+					}
+				} catch (e) {
+					return new Response(JSON.stringify({ success: false, error: 'Invalid token', details: e.message }), {
+						status: 401, headers: jsonHeaders
+					});
+				}
 				const { sessionToken, score, name } = body;
 
 				if (!sessionToken || score === undefined || score === null) {
@@ -684,7 +769,7 @@ export default {
 								score: finalScore,
 								playTimeSeconds: playTimeSeconds,
 								uid: callerUid,
-								isAnonymous: false
+								isAnonymous: isCallerAnonymous
 							});
 						} else {
 							// スコアは低いが名前は同期
@@ -693,7 +778,7 @@ export default {
 								uid: callerUid,
 								score: existingScore,
 								playTimeSeconds: existingData.playTimeSeconds || 0,
-								isAnonymous: false
+								isAnonymous: isCallerAnonymous
 							});
 						}
 					} else {
@@ -705,7 +790,7 @@ export default {
 							difficulty: difficulty,
 							createdAt: 'SERVER_TIMESTAMP',
 							uid: callerUid,
-							isAnonymous: false
+							isAnonymous: isCallerAnonymous
 						});
 					}
 

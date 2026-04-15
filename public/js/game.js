@@ -10,6 +10,16 @@ window.addEventListener("gestureend", (e) => { e.preventDefault(); }, { passive:
 document.addEventListener("touchmove", (e) => {
     if (e.touches.length > 1) { e.preventDefault(); }
 }, { passive: false });
+function escapeHTML(str) {
+    if (!str) return "";
+    return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
 function isTyping() {
     const el = document.activeElement;
     return (
@@ -1265,7 +1275,7 @@ let keys = {};
 let mouse = { x: 0, y: 0, movementX: 0, movementY: 0, down: false };
 let bindingAction = null;
 
-const GAME_VERSION = "1.12.0";
+const GAME_VERSION = "1.12.2";
 let running = false,
     showHelp = false;
 let isPaused = false;
@@ -1869,7 +1879,7 @@ function updateRoomPlayerList() {
         const teamId = actor.getCustomProperty("team") || 1;
         const color = TEAM_COLORS[teamId];
         const li = document.createElement("li");
-        li.innerHTML = `<span style="color:${color};">[チーム ${teamId}] ${name} ${actor.isLocal ? "(あなた)" : ""}</span>`;
+        li.innerHTML = `<span style="color:${color};">[チーム ${teamId}] ${escapeHTML(name)} ${actor.isLocal ? "(あなた)" : ""}</span>`;
         list.appendChild(li);
     }
 }
@@ -3295,7 +3305,7 @@ function showResultModal(winningTeam) {
             }
             const status = s.isGhost ? "撃破" : "生存";
             list.innerHTML += `<div style="color:${TEAM_COLORS[s.team]}; padding:6px; border-bottom:1px solid rgba(0,240,255,0.2);">
-            [チーム ${s.team}] ${name} : ${status}
+            [チーム ${s.team}] ${escapeHTML(name)} : ${status}
         </div>`;
         });
 }
@@ -3331,7 +3341,7 @@ function displayRanking(ranks, currentDiff = null, myScore = null, myName = null
             const idAttr = isMe ? "id='my-latest-rank'" : "";
 
             html += `<li ${idAttr} style="padding:6px; margin-bottom:4px; display:flex; align-items:center; ${highlightStyle}">
-                <span style="display:inline-block; min-width:140px; font-weight:${isMe ? 'bold' : 'normal'}; color:${isMe ? '#00f0ff' : '#ccc'};">${index + 1}. ${name}</span>
+                <span style="display:inline-block; min-width:140px; font-weight:${isMe ? 'bold' : 'normal'}; color:${isMe ? '#00f0ff' : '#ccc'};">${index + 1}. ${escapeHTML(name)}</span>
                 <span style="color:#ffaa00; font-weight:${isMe ? 'bold' : 'normal'};">${pscore} pt</span>
                 <span style="font-size:11px; color:#aaa; margin-left:auto;">[ ${timeStr} ]</span>
             </li>`;
@@ -5510,6 +5520,10 @@ btnBackToPauseMain?.addEventListener("click", () => {
     }
 });
 
+document.getElementById("btnSettingsToTitle")?.addEventListener("click", () => {
+    window.location.reload();
+});
+
 bgmVolumeSlider.value = audioSettings.bgm;
 sfxVolumeSlider.value = audioSettings.sfx;
 damageTextSizeSlider.value =
@@ -6024,7 +6038,9 @@ saveNicknameBtn?.addEventListener("click", async () => {
             const isAnon = window.firebaseAuth && window.firebaseAuth.currentUser && window.firebaseAuth.currentUser.isAnonymous;
             const currentUid = window.firebaseAuth && window.firebaseAuth.currentUser ? window.firebaseAuth.currentUser.uid : null;
             if (window.checkNicknameUnique) {
-                const result = await window.checkNicknameUnique(name, currentUid);
+                const currentLocalName = localStorage.getItem("playerNickname_v1");
+                const isSameAsLocal = (name === currentLocalName && currentLocalName);
+                const result = isSameAsLocal ? { unique: true } : await window.checkNicknameUnique(name, currentUid);
                 if (!result.unique) {
                     const errContainer = document.getElementById("nicknameErrorContainer");
                     const errMsg = document.getElementById("nicknameErrorMessage");
@@ -6071,8 +6087,9 @@ saveNicknameBtn?.addEventListener("click", async () => {
 
         localStorage.setItem("playerNickname_v1", name);
         
-        if (window.submitScoreToServer) {
-            window.submitScoreToServer(0, "normal", 0, null).catch(e => console.warn(e));
+        const currentUid = window.firebaseAuth && window.firebaseAuth.currentUser ? window.firebaseAuth.currentUser.uid : null;
+        if (window.updateNicknameOnServer && currentUid) {
+            window.updateNicknameOnServer(name, currentUid).catch(e => console.warn(e));
         }
 
         nicknameModal.style.display = "none";

@@ -1845,6 +1845,8 @@
                         <p style="font-size: 11px; color: #aaa; margin-bottom: 12px; line-height: 1.4;">
                             メールアドレスを登録してデータをバックアップすることで、別の端末でも同じデータ（ランキング等）で遊ぶことができます。
                         </p>
+                        <button id="changeNicknameBtn" class="cyber-btn"
+                            style="width: 100%; margin-bottom: 8px;">名前を変更</button>
                         <button id="btnOpenAuthFromSettings" class="cyber-btn"
                             style="width: 100%; margin-bottom: 12px;">
                             データをバックアップする (登録)
@@ -1861,8 +1863,8 @@
 
                 <!-- 下部ボタン -->
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 14px;">
-                    <button id="changeNicknameBtn" class="cyber-btn"
-                        style="font-size: 11px; padding: 6px 12px;">名前を変更</button>
+                    <button id="btnSettingsToTitle" class="cyber-btn"
+                        style="font-size: 11px; padding: 6px 12px;">タイトルへ戻る</button>
                     <div style="font-size: 10px; color: rgba(0,240,255,0.4); letter-spacing: 1px;">v<span
                             id="versionText"></span></div>
                     <button id="btnBackToPauseMain" class="cyber-btn"
@@ -2850,6 +2852,23 @@
         }
         window.submitScoreToServer = submitScoreToServer;
         window.fetchTopRanks = fetchTopRanks;
+
+        // サーバー（Firestore）のランキング名も直接更新する（同一UIDなら許可されている）
+        window.updateNicknameOnServer = async function (newName, currentUid) {
+            if (!currentUid) return;
+            try {
+                for (let diff of ["easy", "normal", "hard"]) {
+                    const colName = diff === "easy" ? "rankings_easy" : diff === "hard" ? "rankings_hard" : "rankings";
+                    const q = query(collection(db, colName), where("uid", "==", currentUid));
+                    const snap = await withTimeout(getDocs(q));
+                    for (let docSnap of snap.docs) {
+                        await updateDoc(docSnap.ref, { name: newName });
+                    }
+                }
+            } catch (e) {
+                console.warn("Failed to update nickname in rankings:", e);
+            }
+        };
 
         // ======== 設定のクラウド保存・復元 ========
         window.saveSettingsToCloud = async function (settings) {

@@ -129,14 +129,33 @@
             border-radius: 4px;
             z-index: 2000;
             width: 420px;
+            max-width: calc(100vw - 32px);
             max-height: 88vh;
             overflow-y: auto;
+            overflow-x: hidden;
             color: #dfefff;
             font-size: 14px;
             text-align: center;
             -webkit-overflow-scrolling: touch;
             touch-action: manipulation;
             animation: modalIn 0.22s ease-out forwards;
+            box-sizing: border-box;
+        }
+
+        @media (max-width: 480px) {
+            .game-modal {
+                padding: 16px 12px;
+                width: calc(100vw - 20px);
+                font-size: 13px;
+            }
+            .game-modal h3 {
+                font-size: 18px;
+                letter-spacing: 1.5px;
+            }
+            .cyber-btn {
+                font-size: 12px !important;
+                padding: 10px 12px !important;
+            }
         }
 
         .game-modal h3 {
@@ -1915,6 +1934,11 @@
             <div id="btnTouchBrake" class="touch-action-btn">STOP</div>
             <div id="btnTouchRollRight" class="touch-action-btn">R-SLIDE</div>
             <div id="btnTouchShoot" class="touch-action-btn">SHOOT</div>
+            <div id="btnTouchAction" class="touch-action-btn"
+                style="right: 90px; bottom: 15px; width: 60px; height: 60px; background:rgba(0,180,255,0.4); border-color:#00e5ff; font-size:12px;">
+                ACT [F]</div>
+            <div id="btnTouchItem" class="touch-action-btn"
+                style="display:none; background:rgba(255,150,0,0.4); border-color:#ffaa00;">ITEM</div>
         </div>
         <div id="btnTouchPause" class="touch-action-btn">||</div>
     </div>
@@ -1950,18 +1974,93 @@
     </div>
 
     <!-- モード選択 -->
+    <div id="topCurrencyDisplay"
+        style="position: absolute; top: 10px; right: 20px; color: #00f0ff; font-family: 'Courier New', monospace; font-size: 16px; font-weight: bold; text-shadow: 0 0 10px #00f0ff; display: none; z-index: 1000;">
+        ✨ STARDUST: <span id="stardustNumDisp">0</span>
+    </div>
+
     <div id="modeSelectModal" class="game-modal" style="display: none">
-        <h3>MODE SELECT</h3>
-        <button id="btnSinglePlayer" class="cyber-btn" style="margin-bottom: 12px; width: 80%">
-            シングルプレイ</button><br />
+        <h3>メインメニュー</h3>
+        <button id="btnSinglePlayer" class="cyber-btn btn-orange" style="margin-bottom: 12px; width: 80%">
+            <span style="font-size: 16px; letter-spacing: 2px">🎮 SINGLE PLAYER</span><br />
+            <span style="font-size: 10px; color: #aaa; font-weight: normal">1人で遊ぶ</span></button><br />
         <button id="btnMultiPlayer" class="cyber-btn" style="margin-bottom: 12px; width: 80%">
-            マルチプレイ</button><br />
+            <span style="font-size: 16px; letter-spacing: 2px">🌐 MULTIPLAYER</span><br />
+            <span style="font-size: 10px; color: #aaa; font-weight: normal">オンライン対戦・協力</span></button><br />
+
+        <!-- Skill Tree & Upgrades -->
+        <button id="btnSkillTree" class="cyber-btn"
+            style="margin-bottom: 12px; width: 80%; border-color: #00f0ff; color: #00f0ff; text-shadow: 0 0 5px #00f0ff;">
+            <span style="font-size: 14px; letter-spacing: 1px">🧬 強化 (SKILL TREE)</span><br />
+            <span style="font-size: 10px; color: #aaa; font-weight: normal">スターダストで機体を永続強化</span></button><br />
+
         <button id="btnShowRanking" class="cyber-btn btn-pink" style="margin-bottom: 12px; width: 80%">
-            ランキング</button><br />
-        <button id="btnTestPlay" class="cyber-btn btn-orange" style="margin-bottom: 12px; width: 80%; display: none">
-            テストプレイ</button><br />
+            <span style="font-size: 14px; letter-spacing: 1px">🏆 RANKING</span></button><br />
+        <button id="btnTestPlay" class="cyber-btn" style="margin-bottom: 12px; width: 80%; display: none; border-color: #ff4444; color: #ff6666; text-shadow: 0 0 5px #ff4444;">
+            <span style="font-size: 14px; letter-spacing: 1px">🛠️ TEST PLAY</span><br />
+            <span style="font-size: 10px; color: #aaa; font-weight: normal">開発者テストモード</span></button><br />
         <button id="btnHomeSettings" class="cyber-btn btn-green" style="width: 80%">
-            設定
+            ⚙️ 設定
+        </button>
+    </div>
+
+    <!-- Skill Tree Modal -->
+    <div id="skillTreeModal" class="game-modal" style="display: none; max-height: 80vh; overflow-y: auto;">
+        <h3 style="color: #00f0ff; text-shadow: 0 0 10px #00f0ff; margin-bottom: 10px;">🧬 強化システム</h3>
+        <p style="font-size: 12px; color: #aaa; margin-bottom: 20px;">プレイで獲得したスターダストを消費して機体を永続強化します。<br />現在のスターダスト:
+            <span id="skillStardustDisp" style="color: #ffbb00; font-weight: bold;">0</span>
+        </p>
+
+        <div class="settings-group" style="border-color: #00f0ff;">
+            <div class="setting-item">
+                <span style="font-size: 14px;">🛠 最大HP増加</span>
+                <button id="upgradeHpBtn" class="cyber-btn btn-green" style="font-size: 12px; padding: 4px 10px;">強化
+                    (100 SD)</button>
+            </div>
+            <p style="font-size: 10px; color: #888; text-align: left; margin-bottom: 10px;">現在のレベル: <span
+                    id="lvlHpDisp">0</span> (Max: 10)</p>
+
+            <div class="setting-item">
+                <span style="font-size: 14px;">🚀 移動速度UP</span>
+                <button id="upgradeSpeedBtn" class="cyber-btn btn-green" style="font-size: 12px; padding: 4px 10px;">強化
+                    (100 SD)</button>
+            </div>
+            <p style="font-size: 10px; color: #888; text-align: left; margin-bottom: 10px;">現在のレベル: <span
+                    id="lvlSpeedDisp">0</span> (Max: 5)</p>
+
+            <div class="setting-item">
+                <span style="font-size: 14px;">💥 射撃ダメージ増加</span>
+                <button id="upgradeDmgBtn" class="cyber-btn btn-green" style="font-size: 12px; padding: 4px 10px;">強化
+                    (150 SD)</button>
+            </div>
+            <p style="font-size: 10px; color: #888; text-align: left; margin-bottom: 10px;">現在のレベル: <span
+                    id="lvlDmgDisp">0</span> (Max: 5)</p>
+        </div>
+
+        <button id="btnBackFromSkillTree" class="cyber-btn" style="margin-top: 20px;">◀ 戻る</button>
+    </div>
+
+    <!-- シングルプレイ専用 モード選択 -->
+    <div id="singlePlayerModeModal" class="game-modal" style="display: none">
+        <h3>SINGLE PLAYER</h3>
+        <p style="font-size: 12px; color: #aaa; margin-bottom: 16px">プレイするモードを選択してください</p>
+        <button id="btnClassicDogfight" class="cyber-btn" style="margin-bottom: 12px; width: 80%">
+            <span style="font-size: 14px; letter-spacing: 1px">🌠 クラシック・ドッグファイト</span><br />
+            <span style="font-size: 10px; color: #aaa; font-weight: normal">宇宙空間での標準的なサバイバル戦</span></button><br />
+        <button id="btnStrangerRace" class="cyber-btn btn-orange" style="margin-bottom: 12px; width: 80%">
+            <span style="font-size: 14px; letter-spacing: 1px">🔥 ストレンジャーレース</span><br />
+            <span style="font-size: 10px; color: #aaa; font-weight: normal">アイテム争奪バトル</span></button><br />
+        <button id="btnMothershipWars" class="cyber-btn btn-red" style="margin-bottom: 12px; width: 80%">
+            <span style="font-size: 14px; letter-spacing: 1px">🛡 マザーシップ・ウォーズ</span><br />
+            <span style="font-size: 10px; color: #aaa; font-weight: normal">拠点防衛チーム戦</span></button><br />
+        <button id="btnParasitePanic" class="cyber-btn btn-green" style="margin-bottom: 12px; width: 80%">
+            <span style="font-size: 14px; letter-spacing: 1px">🧟 パラサイト・パニック</span><br />
+            <span style="font-size: 10px; color: #aaa; font-weight: normal">感染サバイバル</span></button><br />
+        <button id="btnGalacticPayload" class="cyber-btn btn-pink" style="margin-bottom: 12px; width: 80%">
+            <span style="font-size: 14px; letter-spacing: 1px">🚀 ギャラクティック・ペイロード</span><br />
+            <span style="font-size: 10px; color: #aaa; font-weight: normal">輸送船護衛ミッション</span></button><br />
+        <button id="btnBackFromSingleModes" class="cyber-btn" style="width: 50%; margin-top: 8px">
+            戻る
         </button>
     </div>
 
@@ -2378,8 +2477,27 @@
     <div id="roomSettingsModal" class="game-modal" style="display: none; width: 540px; z-index: 2100">
         <h3>ROOM SETTINGS</h3>
         <div class="setting-row">
+            <label>ゲームモード</label>
+            <select id="settingGameMode"
+                style="background: rgba(0, 50, 80, 0.5); color: #fff; border: 1px solid #00f0ff; padding: 4px; font-family: 'Courier New', monospace;">
+                <option value="classic">クラシック・ドッグファイト</option>
+                <option value="stranger_race">ストレンジャーレース</option>
+                <option value="mothership_wars">マザーシップ・ウォーズ</option>
+                <option value="parasite_panic">パラサイト・パニック</option>
+                <option value="galactic_payload">ギャラクティック・ペイロード</option>
+            </select>
+        </div>
+        <div class="setting-row">
+            <label>タイムリミット (分)</label>
+            <input type="number" id="settingTimeLimit" value="5" min="1" max="60" style="width: 70px" />
+        </div>
+        <div class="setting-row">
             <label>アステロイドの配置</label>
             <input type="checkbox" id="settingAsteroids" checked />
+        </div>
+        <div class="setting-row">
+            <label>フレンドリーファイア (味方撃ち)</label>
+            <input type="checkbox" id="settingFriendlyFire" />
         </div>
         <div class="setting-row">
             <label>マップサイズ (初期: 10000)</label>
@@ -2659,7 +2777,7 @@
         // 新規訪問者のカウント (一度でも訪れたらlocalStorageにフラグを立ててカウントしない)
         if (!localStorage.getItem("site_visited_v1")) {
             localStorage.setItem("site_visited_v1", "true");
-            
+
             // 管理者でない場合のみサーバーへカウント送信
             if (!isAdminAccess) {
                 try {
@@ -2667,8 +2785,8 @@
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({})
-                    }).catch(e => {}); // エラーは無視（ゲーム進行に影響を与えないため）
-                } catch (e) {}
+                    }).catch(e => { }); // エラーは無視（ゲーム進行に影響を与えないため）
+                } catch (e) { }
             }
         }
 
@@ -2794,23 +2912,6 @@
         };
 
 
-        window.checkNicknameUnique = async function (name, currentUid) {
-            // Check cross all rankings if any other uid is using this name
-            for (let diff of ["easy", "normal", "hard"]) {
-                const colName = diff === "easy" ? "rankings_easy" : diff === "hard" ? "rankings_hard" : "rankings";
-                const q = query(collection(db, colName), where("name", "==", name), limit(10));
-                const snap = await withTimeout(getDocs(q));
-                for (let docSnap of snap.docs) {
-                    const data = docSnap.data();
-                    const isMine = data.uid && data.uid === currentUid;
-                    if (!isMine) {
-                        const isAnon = ('isAnonymous' in data) ? (data.isAnonymous === true) : true;
-                        return { unique: false, ownerIsAnonymous: isAnon };
-                    }
-                }
-            }
-            return { unique: true };
-        };
         async function fetchTopRanks(difficulty) {
             const diff = difficulty || "normal";
             const colName =
@@ -2853,10 +2954,61 @@
         window.submitScoreToServer = submitScoreToServer;
         window.fetchTopRanks = fetchTopRanks;
 
-        // サーバー（Firestore）のランキング名も直接更新する（同一UIDなら許可されている）
+        // ===== ニックネーム一意性チェック（専用 nicknames コレクション参照） =====
+        window.checkNicknameUnique = async function (name, currentUid) {
+            if (!name || name.length === 0 || name.length > 12) return { unique: false };
+            const normalizedName = name.toLowerCase();
+            try {
+                const docRef = doc(db, "nicknames", normalizedName);
+                const snap = await withTimeout(getDoc(docRef));
+                if (!snap.exists()) return { unique: true };
+                const data = snap.data();
+                // 自分自身のUIDが所有者なら「使用可能」として返す
+                if (data.uid && data.uid === currentUid) return { unique: true, ownedBySelf: true };
+                // 他人が所有している
+                const ownerIsAnonymous = !data.uid; // UIDがなければ匿名扱い
+                return { unique: false, ownerIsAnonymous };
+            } catch (e) {
+                console.warn("Nickname check error:", e);
+                throw e; // 呼び出し元でエラーハンドリングさせる
+            }
+        };
+
+        // ===== ニックネーム予約（新規 or 自分の名前変更時） =====
+        window.reserveNickname = async function (newName, currentUid) {
+            if (!currentUid || !newName || newName.length === 0 || newName.length > 12) return false;
+            const normalizedNew = newName.toLowerCase();
+            try {
+                // 自分が以前予約していた古いニックネームを探して削除
+                const oldQ = query(collection(db, "nicknames"), where("uid", "==", currentUid));
+                const oldSnap = await withTimeout(getDocs(oldQ));
+                for (let oldDoc of oldSnap.docs) {
+                    if (oldDoc.id !== normalizedNew) {
+                        await deleteDoc(oldDoc.ref);
+                    }
+                }
+                // 新しいニックネームを予約（setDocで上書き or 新規作成）
+                const docRef = doc(db, "nicknames", normalizedNew);
+                await withTimeout(setDoc(docRef, {
+                    uid: currentUid,
+                    displayName: newName,
+                    createdAt: serverTimestamp()
+                }));
+                return true;
+            } catch (e) {
+                console.warn("Nickname reservation failed:", e);
+                return false;
+            }
+        };
+
+        // ===== ニックネーム変更時のサーバー同期 =====
+        // ランキングの名前 + ニックネーム予約テーブルの両方を更新する
         window.updateNicknameOnServer = async function (newName, currentUid) {
             if (!currentUid) return;
             try {
+                // 1. ニックネーム予約テーブルを更新
+                await window.reserveNickname(newName, currentUid);
+                // 2. 全ランキングコレクションの名前も同期
                 for (let diff of ["easy", "normal", "hard"]) {
                     const colName = diff === "easy" ? "rankings_easy" : diff === "hard" ? "rankings_hard" : "rankings";
                     const q = query(collection(db, colName), where("uid", "==", currentUid));
@@ -2866,7 +3018,7 @@
                     }
                 }
             } catch (e) {
-                console.warn("Failed to update nickname in rankings:", e);
+                console.warn("Failed to update nickname on server:", e);
             }
         };
 
@@ -3063,6 +3215,7 @@
         </div>
     </div>
 
+    <script src="js/gamemodes.js"></script>
     <script src="js/game.js"></script>
 </body>
 

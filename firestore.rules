@@ -51,6 +51,27 @@ service cloud.firestore {
       allow update, delete: if request.auth != null;
     }
 
+    // ===== ニックネーム予約テーブル（UID紐付き一意性保証） =====
+    // ドキュメントID = 正規化済みニックネーム（小文字化）
+    // フィールド: uid, displayName（表示用の元の名前）, createdAt
+    match /nicknames/{nicknameId} {
+      // 認証済みユーザーのみ読み取り可（未認証からの一覧取得を防止）
+      allow read: if request.auth != null;
+      // 作成: 認証済み + uidが自分 + displayNameが1〜12文字
+      allow create: if request.auth != null
+                    && request.resource.data.uid == request.auth.uid
+                    && request.resource.data.displayName is string
+                    && request.resource.data.displayName.size() >= 1
+                    && request.resource.data.displayName.size() <= 12;
+      // 更新: 自分が所有するドキュメントのみ + uidは変更不可
+      allow update: if request.auth != null
+                    && resource.data.uid == request.auth.uid
+                    && request.resource.data.uid == request.auth.uid;
+      // 削除: 自分が所有するドキュメントのみ
+      allow delete: if request.auth != null
+                    && resource.data.uid == request.auth.uid;
+    }
+
     // ===== ユーザー設定（本人のみ読み書き可） =====
     match /user_settings/{uid} {
       allow read, write: if request.auth != null && request.auth.uid == uid;

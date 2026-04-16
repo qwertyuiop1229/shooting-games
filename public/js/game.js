@@ -139,7 +139,7 @@ function collectAllSettings() {
     const audio = loadAudioSettings();
     const keyBindings = loadKeyBindings();
     const uiLayout = JSON.parse(localStorage.getItem("uiLayout_v1") || "{}");
-    
+
     return {
         features,
         audio,
@@ -1195,6 +1195,102 @@ class FloatingText {
         this.life -= dt;
     }
 }
+class StardustItem {
+    constructor(x, y, value) {
+        this.x = x;
+        this.y = y;
+        this.vx = rand(-50, 50);
+        this.vy = rand(-50, 50);
+        this.value = value;
+        this.life = 15.0; // lives for 15 seconds
+
+        // Decide color based on value
+        if (value >= 100) this.color = "#ffbb00"; // Gold
+        else if (value >= 25) this.color = "#ff00ff"; // Purple
+        else this.color = "#00f0ff"; // Cyan
+
+        this.size = Math.min(10, 3 + Math.sqrt(value));
+    }
+
+    update(dt, player) {
+        this.life -= dt;
+        if (player && player.alive && !player.isGhost) {
+            const dx = player.x - this.x;
+            const dy = player.y - this.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist < 150) { // 磁石効果
+                this.vx += (dx / dist) * 300 * dt;
+                this.vy += (dy / dist) * 300 * dt;
+            }
+            if (dist < player.radius + this.size + 10) {
+                // Collect!
+                window.totalStardust += this.value;
+                localStorage.setItem("astrofray_stardust", window.totalStardust.toString());
+
+                // Show floating text
+                floatingTexts.push(new FloatingText(this.x, this.y, `+${this.value} STARDUST`, this.color, 1.5, 14));
+                playExplosionSound("small");
+                this.life = 0;
+            }
+        }
+
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+        this.vx *= 0.95;
+        this.vy *= 0.95;
+    }
+
+    draw(ctx, camX, camY) {
+        if (this.life <= 0) return;
+        ctx.save();
+        ctx.translate(this.x - camX, this.y - camY);
+
+        // Blink logic if expiring
+        if (this.life < 3.0 && Math.floor(this.life * 10) % 2 === 0) {
+            ctx.globalAlpha = 0.5;
+        }
+
+        ctx.fillStyle = this.color;
+        ctx.beginPath();
+        // Star shape or simple diamond
+        ctx.moveTo(0, -this.size);
+        ctx.lineTo(this.size / 2, -this.size / 4);
+        ctx.lineTo(this.size, 0);
+        ctx.lineTo(this.size / 2, this.size / 4);
+        ctx.lineTo(0, this.size);
+        ctx.lineTo(-this.size / 2, this.size / 4);
+        ctx.lineTo(-this.size, 0);
+        ctx.lineTo(-this.size / 2, -this.size / 4);
+        ctx.closePath();
+        ctx.fill();
+
+        // Glow effect
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = this.color;
+        ctx.fill();
+
+        ctx.restore();
+    }
+}
+
+function spawnStardust(x, y, amount) {
+    if (window.isMultiplayer && !isRoomHost()) return;
+
+    // Break into pieces
+    let remaining = amount;
+    while (remaining > 0) {
+        let pieceVal = 10;
+        if (remaining >= 100 && Math.random() < 0.5) pieceVal = 100;
+        else if (remaining >= 25 && Math.random() < 0.5) pieceVal = 25;
+        else pieceVal = 10;
+
+        if (pieceVal > remaining) pieceVal = remaining;
+
+        stardustDrops.push(new StardustItem(x + rand(-20, 20), y + rand(-20, 20), pieceVal));
+        remaining -= pieceVal;
+    }
+}
+
 class PowerUp {
     constructor(x, y) {
         this.x = x;
@@ -1275,7 +1371,7 @@ let keys = {};
 let mouse = { x: 0, y: 0, movementX: 0, movementY: 0, down: false };
 let bindingAction = null;
 
-const GAME_VERSION = "1.13.0";
+const GAME_VERSION = "1.13.5";
 let running = false,
     showHelp = false;
 let isPaused = false;
@@ -1388,6 +1484,16 @@ window.addEventListener("keydown", (e) => {
         zoomLevel = Math.max(zoomLevel - 0.1, 0.3);
         localStorage.setItem("zoomLevel_v1", zoomLevel.toString());
         e.preventDefault();
+    }
+
+    // アイテム使用キー（F）
+    if (k === "f" && running && !isPaused && !gameOverMode) {
+        if (window.gameModeSystem && window.currentGameMode === window.GameModes.STRANGER_RACE) {
+            const player = ships.find(s => s.id === playerId);
+            if (player && player.alive && !player.isGhost) {
+                window.gameModeSystem.useItem(playerId, player, ships, WORLD_W, WORLD_H);
+            }
+        }
     }
 });
 window.addEventListener("keyup", (e) => {
@@ -1749,6 +1855,35 @@ bindTouchBtn("btnTouchBoost", ["shift"]);
 bindTouchBtn("btnTouchBrake", ["s"]);
 bindTouchBtn("btnTouchRollLeft", ["q"]);
 bindTouchBtn("btnTouchRollRight", ["e"]);
+// タッチアイテムボタン（新ゲームモード用）
+const btnTouchItem = document.getElementById("btnTouchItem");
+if (btnTouchItem) {
+    btnTouchItem.addEventListener("touchstart", (e) => {
+        e.preventDefault();
+        if (window.gameModeSystem && window.currentGameMode === window.GameModes.STRANGER_RACE) {
+            const player = ships.find(s => s.id === playerId);
+            if (player && player.alive && !player.isGhost) {
+                window.gameModeSystem.useItem(playerId, player, ships, WORLD_W, WORLD_H);
+            }
+        }
+    });
+
+    const btnTouchAction = document.getElementById("btnTouchAction");
+    if (btnTouchAction) {
+        btnTouchAction.addEventListener("touchstart", (e) => {
+            e.preventDefault();
+            keys["f"] = true;
+        });
+        btnTouchAction.addEventListener("touchend", (e) => {
+            e.preventDefault();
+            keys["f"] = false;
+        });
+        btnTouchAction.addEventListener("touchcancel", (e) => {
+            e.preventDefault();
+            keys["f"] = false;
+        });
+    }
+}
 
 const btnTouchPause = document.getElementById("btnTouchPause");
 if (btnTouchPause) {
@@ -1801,6 +1936,9 @@ window.leaveMultiplayerRoom = function (showAlert = false, msg = "") {
         running = false;
         isPaused = false;
         matchEnded = false;
+        gameOverMode = false;
+        window.gameModeSystem = null;
+        window.currentGameMode = window.GameModes ? window.GameModes.CLASSIC : "classic";
 
         document
             .querySelectorAll(".game-modal")
@@ -1836,6 +1974,8 @@ let bullets = [];
 let particles = [];
 let asteroids = [];
 let ships = [];
+let stardustDrops = [];
+window.totalStardust = parseInt(localStorage.getItem("astrofray_stardust")) || 0;
 let idGen = 2;
 const playerId = 1;
 
@@ -2172,6 +2312,12 @@ function renderTeamSettings() {
 document
     .getElementById("btnOpenRoomSettings")
     ?.addEventListener("click", () => {
+        document.getElementById("settingGameMode").value =
+            window.currentRoomSettings.gameMode || "classic";
+        document.getElementById("settingTimeLimit").value =
+            window.currentRoomSettings.timeLimit || 5;
+        document.getElementById("settingFriendlyFire").checked =
+            window.currentRoomSettings.friendlyFire === true;
         document.getElementById("settingAsteroids").checked =
             window.currentRoomSettings.asteroids !== false;
         document.getElementById("settingMapSize").value =
@@ -2189,6 +2335,12 @@ document
 document
     .getElementById("btnApplyRoomSettings")
     ?.addEventListener("click", () => {
+        window.currentRoomSettings.gameMode =
+            document.getElementById("settingGameMode").value;
+        window.currentRoomSettings.timeLimit =
+            parseInt(document.getElementById("settingTimeLimit").value) || 5;
+        window.currentRoomSettings.friendlyFire =
+            document.getElementById("settingFriendlyFire").checked;
         window.currentRoomSettings.asteroids =
             document.getElementById("settingAsteroids").checked;
         window.currentRoomSettings.mapSize =
@@ -2592,6 +2744,7 @@ function startCountdownAndPlay(settings) {
 
                     window.isMultiplayer = true;
                     window.currentRoomSettings = settings;
+                    window.currentGameMode = settings.gameMode || "classic";
                     initGame();
                 }
             }, 1000);
@@ -2739,8 +2892,98 @@ function initGame() {
     if (!window.isMultiplayer) {
         document.getElementById("hudHintText").innerText =
             "(P=ポーズ/メニュー, R=戻る, H=ヘルプ)";
-        spawnAsteroids(20);
-        spawnEnemyWave(1);
+
+        // ゲームモード別の初期化
+        const mode = window.currentGameMode || window.GameModes.CLASSIC;
+        if (mode === window.GameModes.CLASSIC || !mode) {
+            spawnAsteroids(20);
+            spawnEnemyWave(1);
+            window.gameModeSystem = null;
+        } else if (window.createGameModeSystem) {
+            window.gameModeSystem = window.createGameModeSystem(mode);
+            if (window.gameModeSystem) {
+                if (mode === window.GameModes.STRANGER_RACE) {
+                    // ストレンジャーレース: 闘技場にAI敵を配置
+                    spawnAsteroids(15);
+                    message = "🔥 STRANGER RACE: アイテムを拾って敵を撃破せよ！ [F]でアイテム使用";
+                    // AI対戦相手をスポーン
+                    for (let i = 0; i < 5; i++) {
+                        const enemy = {
+                            id: "sr_ai_" + (++idGen), faction: "enemy", team: 2,
+                            x: rand(0, WORLD_W), y: rand(0, WORLD_H),
+                            vx: 0, vy: 0, angle: rand(0, Math.PI * 2),
+                            turnSpeed: 0.05, thrust: 0.08, maxSpeed: 4, drag: 0.005,
+                            heat: 0, maxHeat: 100, boosting: false, boostTimer: 0,
+                            shootCd: 200, shootTimer: 0, alive: true, isGhost: false,
+                            hp: 150, maxHp: 150, scoreValue: 50, rollPhase: 0,
+                            ai: { state: "seek", timer: 0, targetId: null }, weaponType: 0, weaponTimer: 0,
+                        };
+                        ships.push(enemy);
+                    }
+                    window.gameModeSystem.init(ships, WORLD_W, WORLD_H);
+                } else if (mode === window.GameModes.MOTHERSHIP_WARS) {
+                    spawnAsteroids(10);
+                    message = "🛡 MOTHERSHIP WARS: クリスタルを集めて母艦を守れ！";
+                    // チーム2のAI
+                    for (let i = 0; i < 4; i++) {
+                        const enemy = {
+                            id: "mw_ai_" + (++idGen), faction: "enemy", team: 2,
+                            x: WORLD_W * 0.8 + rand(-100, 100), y: WORLD_H * 0.8 + rand(-100, 100),
+                            vx: 0, vy: 0, angle: rand(0, Math.PI * 2),
+                            turnSpeed: 0.05, thrust: 0.09, maxSpeed: 4.5, drag: 0.005,
+                            heat: 0, maxHeat: 100, boosting: false, boostTimer: 0,
+                            shootCd: 180, shootTimer: 0, alive: true, isGhost: false,
+                            hp: 200, maxHp: 200, scoreValue: 30, rollPhase: 0,
+                            ai: { state: "seek", timer: 0, targetId: null }, weaponType: 0, weaponTimer: 0,
+                        };
+                        ships.push(enemy);
+                    }
+                    window.gameModeSystem.init(2, WORLD_W, WORLD_H);
+                } else if (mode === window.GameModes.PARASITE_PANIC) {
+                    spawnAsteroids(25);
+                    message = "🧟 PARASITE PANIC: 感染から逃げ延びろ！";
+                    // AI サバイバー
+                    for (let i = 0; i < 6; i++) {
+                        const surv = {
+                            id: "pp_ai_" + (++idGen), faction: "player", team: 1, isRemotePlayer: false,
+                            x: rand(200, WORLD_W - 200), y: rand(200, WORLD_H - 200),
+                            vx: 0, vy: 0, angle: rand(0, Math.PI * 2),
+                            turnSpeed: 0.06, thrust: 0.1, maxSpeed: 5, drag: 0.005,
+                            heat: 0, maxHeat: 100, boosting: false, boostTimer: 0,
+                            shootCd: 150, shootTimer: 0, alive: true, isGhost: false,
+                            hp: 100, maxHp: 100, scoreValue: 0, rollPhase: 0,
+                            ai: { state: "wander", timer: 0, targetId: null }, weaponType: 0, weaponTimer: 0,
+                        };
+                        ships.push(surv);
+                    }
+                    window.gameModeSystem.init(ships, playerId);
+                } else if (mode === window.GameModes.GALACTIC_PAYLOAD) {
+                    spawnAsteroids(12);
+                    message = "🚀 GALACTIC PAYLOAD: 輸送船をゴールまで護衛せよ！";
+                    // 攻撃側AI
+                    for (let i = 0; i < 5; i++) {
+                        const atkAI = {
+                            id: "gp_ai_" + (++idGen), faction: "enemy", team: 2,
+                            x: rand(WORLD_W * 0.6, WORLD_W * 0.9), y: rand(0, WORLD_H),
+                            vx: 0, vy: 0, angle: rand(0, Math.PI * 2),
+                            turnSpeed: 0.05, thrust: 0.09, maxSpeed: 4.5, drag: 0.005,
+                            heat: 0, maxHeat: 100, boosting: false, boostTimer: 0,
+                            shootCd: 160, shootTimer: 0, alive: true, isGhost: false,
+                            hp: 180, maxHp: 180, scoreValue: 40, rollPhase: 0,
+                            ai: { state: "seek", timer: 0, targetId: null }, weaponType: 0, weaponTimer: 0,
+                        };
+                        ships.push(atkAI);
+                    }
+                    window.gameModeSystem.init(WORLD_W, WORLD_H, 1, 2);
+                }
+            }
+        }
+
+        // 環境ハザードの初期化 (全オフラインモード共通)
+        window.environmentalHazards = [];
+        if (typeof window.SolarStorm !== "undefined") {
+            window.environmentalHazards.push(new window.SolarStorm(WORLD_W, WORLD_H));
+        }
     } else {
         matchStartTime = performance.now();
         if (isRoomHost()) {
@@ -3418,6 +3661,11 @@ function update(dt) {
         }
         if (powerups[i].life <= 0) powerups.splice(i, 1);
     }
+
+    for (let i = stardustDrops.length - 1; i >= 0; i--) {
+        stardustDrops[i].update(dt, player);
+        if (stardustDrops[i].life <= 0) stardustDrops.splice(i, 1);
+    }
     // 武器タイマー管理（実時間ベース）
     if (player && player.weaponType > 0 && player.weaponStartTime) {
         const elapsed = performance.now() - player.weaponStartTime;
@@ -3469,6 +3717,14 @@ function update(dt) {
                     player.angle += joystickVector.x * touchCamSpeed;
                     if (keys["touch_thrust"]) thrustKey = true;
                     if (keys["touch_brake"]) brakeKey = true;
+                } else if (controlMode === "mouse" && document.pointerLockElement !== canvas) {
+                    // Pointer lock not yet acquired: use normal absolute aim
+                    const canvasRect = canvas.getBoundingClientRect();
+                    const aimAng = Math.atan2(
+                        mouse.y - canvasRect.height / 2,
+                        mouse.x - canvasRect.width / 2,
+                    );
+                    player.angle = angleLerp(player.angle, aimAng, 0.28);
                 }
             } else if (controlMode === "touch" && keys["touch_aim"]) {
                 player.angle = angleLerp(player.angle, keys["touch_angle"], 0.28);
@@ -3582,6 +3838,14 @@ function update(dt) {
                 if (controlMode === "touch") {
                     const touchCamSpeed = 0.04 * (minecraftSensitivity / 5);
                     player.angle += joystickVector.x * touchCamSpeed;
+                } else if (controlMode === "mouse" && document.pointerLockElement !== canvas) {
+                    // Pointer lock not yet acquired: use normal absolute aim
+                    const canvasRect = canvas.getBoundingClientRect();
+                    const aimAng = Math.atan2(
+                        mouse.y - canvasRect.height / 2,
+                        mouse.x - canvasRect.width / 2,
+                    );
+                    player.angle = angleLerp(player.angle, aimAng, 0.28);
                 }
             } else if (controlMode === "touch" && keys["touch_aim"]) {
                 player.angle = angleLerp(player.angle, keys["touch_angle"], 0.28);
@@ -3668,7 +3932,15 @@ function update(dt) {
                 s.angle = angleLerp(s.angle, s.targetAngle, lerpRate);
             continue;
         }
-        if (s.faction === "player" || !s.ai || s.isGhost) continue;
+
+        if (s.isBoss) {
+            if (typeof s.update === "function") {
+                s.update(dt, ships, bullets, particles, WORLD_W, WORLD_H);
+            }
+            continue;
+        }
+
+        if (s.faction === "player" || !s.ai || s.isGhost || s.customAI) continue;
 
         if (window.isMultiplayer && !isRoomHost()) continue;
 
@@ -4140,8 +4412,21 @@ function update(dt) {
                     (window.isMultiplayer && isRoomHost()); // マルチプレイ時はホストが全判定
 
                 if (isMine) {
-                    const damage = 20;
-                    s.hp -= damage;
+                    let damage = 20;
+                    if (b.owner === playerId && window.playerSkills) {
+                        damage += window.playerSkills.dmgLvl * 5;
+                    }
+
+                    if (s.isBoss) {
+                        // Boss part hit detection (Simplified to core or phase 1 engines)
+                        let partHit = "core";
+                        if (s.phase === 1) partHit = Math.random() > 0.5 ? "leftEngine" : "rightEngine";
+                        else if (s.phase === 2) partHit = "mainCannon";
+                        else partHit = "core";
+                        s.takeDamage(damage, partHit);
+                    } else {
+                        s.hp -= damage;
+                    }
 
                     if (window.isMultiplayer && isRoomHost()) {
                         // ホストがダメージを確定させて全員に通知
@@ -4192,6 +4477,7 @@ function update(dt) {
                             s.hp = 0;
                             if (powerupsEnabled && Math.random() < s.dropRate)
                                 spawnPowerUp(s.x, s.y);
+                            spawnStardust(s.x, s.y, s.maxHp || 100);
                             if (!window.isMultiplayer) {
                                 if (b.owner === playerId) {
                                     addScore(150, s.x, s.y);
@@ -4260,7 +4546,15 @@ function update(dt) {
 
                 if (isMine) {
                     const damage = 40 * dt;
-                    s.hp -= damage;
+
+                    if (s.isBoss) {
+                        let partHit = "core";
+                        if (s.phase === 1) partHit = Math.random() > 0.5 ? "leftEngine" : "rightEngine";
+                        else if (s.phase === 2) partHit = "mainCannon";
+                        s.takeDamage(damage, partHit);
+                    } else {
+                        s.hp -= damage;
+                    }
 
                     if (window.isMultiplayer && isRoomHost()) {
                         photonClient.raiseEvent(7, {
@@ -4307,6 +4601,7 @@ function update(dt) {
                     } else {
                         s.alive = false;
                         s.hp = 0;
+                        spawnStardust(s.x, s.y, s.maxHp || 100);
                         if (
                             window.isMultiplayer &&
                             isRoomHost() &&
@@ -4352,8 +4647,18 @@ function update(dt) {
         const need = Math.max(0, targetAsteroids - currentAsteroids);
         if (need > 0) spawnAsteroids(need);
         wave += 1;
-        spawnWave(spawnEnemies, spawnAllies);
-        message = `WAVE ${wave}!`;
+        if (wave % 10 === 0 && window.currentGameMode === 'classic') {
+            if (typeof window.LeviathanBoss !== "undefined") {
+                const bossX = player ? player.x + 800 : WORLD_W / 2;
+                const bossY = player ? player.y : WORLD_H / 2;
+                ships.push(new window.LeviathanBoss(bossX, bossY, Math.floor(wave / 10)));
+                message = `WARNING! LEVIATHAN CLASS DETECTED!`;
+                if (typeof window.cameraShake !== "undefined") window.cameraShake = 30; // heavy shake
+            }
+        } else {
+            spawnWave(spawnEnemies, spawnAllies);
+            message = `WAVE ${wave}!`;
+        }
         if (player && player.alive)
             floatingTexts.push(
                 new FloatingText(
@@ -4366,6 +4671,63 @@ function update(dt) {
                 ),
             );
     }
+
+    // ===== ゲームモードシステム更新 =====
+    if (window.gameModeSystem && !window.isMultiplayer) {
+        const mode = window.currentGameMode;
+        const gms = window.gameModeSystem;
+
+        if (mode === window.GameModes.STRANGER_RACE) {
+            gms.update(dt, ships, WORLD_W, WORLD_H, torusDist2, wrap, playerId);
+            // EMP中はプレイヤーの操作を無効化
+            if (gms.isEMPedFor(playerId) && player) {
+                player.vx *= 0.95;
+                player.vy *= 0.95;
+            }
+            // マッチ終了
+            if (gms.isMatchOver() && !gameOverMode) {
+                enterGameOverMode();
+            }
+        } else if (mode === window.GameModes.MOTHERSHIP_WARS) {
+            gms.update(dt, ships, bullets, WORLD_W, WORLD_H, torusDist2);
+            if (gms.isMatchOver() && !gameOverMode) {
+                const winner = gms.getWinningTeam();
+                message = winner === 1 ? "🎉 勝利！ 敵の母艦を破壊した！" : "💀 敗北... 母艦が破壊された";
+                enterGameOverMode();
+            }
+        } else if (mode === window.GameModes.PARASITE_PANIC) {
+            gms.update(dt, ships, WORLD_W, WORLD_H, torusDist2, playerId);
+            if (gms.isMatchOver() && !gameOverMode) {
+                const survWin = gms.getSurvivorsWin();
+                const wasParasite = gms.isParasite(playerId);
+                if (survWin) {
+                    message = wasParasite ? "💀 サバイバーが逃げ切った..." : "🎉 生存成功！";
+                } else {
+                    message = wasParasite ? "🧟 全員感染！パラサイト勝利！" : "💀 感染された...";
+                }
+                enterGameOverMode();
+            }
+        } else if (mode === window.GameModes.GALACTIC_PAYLOAD) {
+            gms.update(dt, ships, bullets);
+            if (gms.isMatchOver() && !gameOverMode) {
+                const result = gms.getResult();
+                if (result.winner === "defense") {
+                    message = "🎉 護衛成功！ 輸送船がゴールに到達した！";
+                } else {
+                    message = result.reason === "destroyed" ? "💀 輸送船が破壊された..." : "💀 時間切れ... 護衛失敗";
+                }
+                enterGameOverMode();
+            }
+        }
+    }
+
+    // ===== 環境ハザード更新 =====
+    if (window.environmentalHazards && !window.isMultiplayer) {
+        for (const hazard of window.environmentalHazards) {
+            hazard.update(dt, ships);
+        }
+    }
+
     fpsFrames += 1;
     fpsAccum += dt;
     if (fpsAccum >= 1.0) {
@@ -4505,6 +4867,18 @@ function render() {
             continue;
         drawAsteroid(ctx, a, sc.sx, sc.sy);
         drawnAsteroids++;
+    }
+
+    for (const sd of stardustDrops) {
+        const sc = toScreen(sd.x, sd.y, camX, camY, vw, vh);
+        if (
+            sc.sx < vLeft - 20 ||
+            sc.sx > vRight + 20 ||
+            sc.sy < vTop - 20 ||
+            sc.sy > vBottom + 20
+        )
+            continue;
+        sd.draw(ctx, camX, camY);
     }
 
     for (const pu of powerups) {
@@ -4652,13 +5026,19 @@ function render() {
             continue;
         const sc = toScreen(s.x, s.y, camX, camY, vw, vh);
         if (
-            sc.sx < vLeft - 40 ||
-            sc.sx > vRight + 40 ||
-            sc.sy < vTop - 40 ||
-            sc.sy > vBottom + 40
+            sc.sx < vLeft - 400 ||
+            sc.sx > vRight + 400 ||
+            sc.sy < vTop - 400 ||
+            sc.sy > vBottom + 400
         )
             continue;
-        drawShip(ctx, s, sc.sx, sc.sy);
+
+        if (s.isBoss) {
+            if (typeof s.draw === "function") s.draw(ctx, camX, camY);
+        } else {
+            drawShip(ctx, s, sc.sx, sc.sy);
+        }
+
 
         // Draw Aim Line
         if (s.id === playerId && featureSettings.aimLine && !s.isGhost && !gameOverMode) {
@@ -4706,7 +5086,68 @@ function render() {
     }
 
     ctx.restore();
+
+    // ===== ゲームモードのワールド内エンティティ描画 =====
+    if (window.gameModeSystem && running) {
+        const gms = window.gameModeSystem;
+        const mode = window.currentGameMode;
+        const TEAM_COLORS_GM = { 1: "#00aaff", 2: "#ff3333", 3: "#00ff66", 4: "#ffaa00", 99: "#aa0000" };
+
+        if (mode === window.GameModes.STRANGER_RACE) {
+            gms.draw(ctx, camX, camY, vw, vh, WORLD_W, WORLD_H);
+        } else if (mode === window.GameModes.MOTHERSHIP_WARS) {
+            gms.draw(ctx, camX, camY, vw, vh, WORLD_W, WORLD_H, TEAM_COLORS_GM);
+        } else if (mode === window.GameModes.PARASITE_PANIC) {
+            gms.draw(ctx, camX, camY, vw, vh, ships);
+        } else if (mode === window.GameModes.GALACTIC_PAYLOAD) {
+            gms.draw(ctx, camX, camY, vw, vh);
+        }
+    }
+
+    // ===== 環境ハザード描画 =====
+    if (window.environmentalHazards && !window.isMultiplayer) {
+        for (const hazard of window.environmentalHazards) {
+            hazard.draw(ctx, camX, camY, vw, vh);
+        }
+    }
+
     drawUI(ctx, vLeft, vRight, vTop, vBottom);
+
+    // ===== 環境ハザードのHUD描画 =====
+    if (window.environmentalHazards && !window.isMultiplayer) {
+        for (const hazard of window.environmentalHazards) {
+            if (typeof hazard.drawHUD === "function") {
+                hazard.drawHUD(ctx, vw, vh);
+            }
+        }
+    }
+
+    // ===== ボスHUD描画 =====
+    for (const s of ships) {
+        if (s.isBoss && typeof s.drawHUD === "function") {
+            s.drawHUD(ctx, vw, vh);
+        }
+    }
+
+
+    // ===== ゲームモードのHUD描画（UI上に重ねる） =====
+    if (window.gameModeSystem && running) {
+        const gms = window.gameModeSystem;
+        const mode = window.currentGameMode;
+        const TEAM_COLORS_GM = { 1: "#00aaff", 2: "#ff3333", 3: "#00ff66", 4: "#ffaa00", 99: "#aa0000" };
+        const player = ships.find(s => s.id === playerId);
+        const playerTeam = player ? player.team : 1;
+
+        if (mode === window.GameModes.STRANGER_RACE) {
+            gms.drawHUD(ctx, vw, vh, playerId);
+        } else if (mode === window.GameModes.MOTHERSHIP_WARS) {
+            gms.drawHUD(ctx, vw, vh, playerId, playerTeam, TEAM_COLORS_GM);
+        } else if (mode === window.GameModes.PARASITE_PANIC) {
+            gms.drawHUD(ctx, vw, vh, playerId);
+        } else if (mode === window.GameModes.GALACTIC_PAYLOAD) {
+            gms.drawHUD(ctx, vw, vh, playerId, playerTeam);
+        }
+    }
 }
 
 function drawAsteroid(ctx, a, sx, sy) {
@@ -5281,6 +5722,11 @@ function respawnPlayer() {
     for (let i = ships.length - 1; i >= 0; i--) {
         if (ships[i].id === playerId) ships.splice(i, 1);
     }
+
+    // Skill Level Modifiers
+    const hpMod = window.playerSkills ? window.playerSkills.hpLvl * 20 : 0;
+    const speedMod = window.playerSkills ? window.playerSkills.speedLvl * 0.5 : 0;
+
     const p = {
         id: playerId,
         faction: "player",
@@ -5292,7 +5738,7 @@ function respawnPlayer() {
         angle: -Math.PI / 2,
         turnSpeed: 0.07,
         thrust: 0.12,
-        maxSpeed: 6,
+        maxSpeed: 6 + speedMod,
         drag: 0.005,
         heat: 0,
         maxHeat: 100,
@@ -5302,8 +5748,8 @@ function respawnPlayer() {
         shootTimer: 0,
         alive: true,
         isGhost: false,
-        hp: 250,
-        maxHp: 250,
+        hp: 250 + hpMod,
+        maxHp: 250 + hpMod,
         scoreValue: 0,
         rollPhase: 0,
         ai: null,
@@ -5380,18 +5826,31 @@ function respawnAI(s) {
 }
 
 /* ========== メインループ ========== */
+window.hitPauseFrames = 0;
 function frame(t) {
     const dt = Math.min(1 / 30, (t - last) / 1000);
     last = t;
-    if (running) {
-        update(dt);
+
+    if (window.hitPauseFrames > 0) {
+        window.hitPauseFrames--;
+        // スキップして描画だけ行う
     } else {
-        if (cameraShake > 0) {
-            cameraShake *= 0.9;
-            if (cameraShake < 0.5) cameraShake = 0;
+        if (running) {
+            update(dt);
+        } else {
+            if (cameraShake > 0) {
+                cameraShake *= 0.9;
+                if (cameraShake < 0.5) cameraShake = 0;
+            }
         }
     }
-    render();
+
+    try {
+        render();
+    } catch (e) {
+        console.error("Render target crashed! Recovering bounds...", e);
+        // 描画が崩壊した場合は次のフレームで復帰を試みる
+    }
     requestAnimationFrame(frame);
 }
 
@@ -6045,14 +6504,14 @@ saveNicknameBtn?.addEventListener("click", async () => {
                     const errContainer = document.getElementById("nicknameErrorContainer");
                     const errMsg = document.getElementById("nicknameErrorMessage");
                     const loginBtn = document.getElementById("nicknameLoginBtn");
-                    
+
                     if (isAnon) {
-                        errMsg.style.color = "#ffaa00"; 
+                        errMsg.style.color = "#ffaa00";
                         errMsg.style.textShadow = "0 0 5px rgba(255,170,0,0.5)";
                         errMsg.innerText = "このコールサインは登録済みです。\nあなたのデータですか？";
                         loginBtn.style.display = "inline-block";
                     } else {
-                        errMsg.style.color = "#ff0055"; 
+                        errMsg.style.color = "#ff0055";
                         errMsg.style.textShadow = "0 0 5px rgba(255,0,85,0.5)";
                         errMsg.innerText = "既に使用されています。\n別の名前を入力してください。";
                         loginBtn.style.display = "none";
@@ -6067,7 +6526,7 @@ saveNicknameBtn?.addEventListener("click", async () => {
                     return;
                 }
             }
-        } catch(e) {
+        } catch (e) {
             console.error(e);
             const errContainer = document.getElementById("nicknameErrorContainer");
             const errMsg = document.getElementById("nicknameErrorMessage");
@@ -6081,12 +6540,12 @@ saveNicknameBtn?.addEventListener("click", async () => {
             saveNicknameBtn.innerText = "システム起動";
             return;
         }
-        
+
         saveNicknameBtn.disabled = false;
         saveNicknameBtn.innerText = "システム起動";
 
         localStorage.setItem("playerNickname_v1", name);
-        
+
         const currentUid = window.firebaseAuth && window.firebaseAuth.currentUser ? window.firebaseAuth.currentUser.uid : null;
         if (window.updateNicknameOnServer && currentUid) {
             window.updateNicknameOnServer(name, currentUid).catch(e => console.warn(e));
@@ -6173,7 +6632,13 @@ document
     .getElementById("btnSinglePlayer")
     ?.addEventListener("click", () => {
         document.getElementById("modeSelectModal").style.display = "none";
-        document.getElementById("difficultyModal").style.display = "block";
+        document.getElementById("singlePlayerModeModal").style.display = "block";
+    });
+document
+    .getElementById("btnBackFromSingleModes")
+    ?.addEventListener("click", () => {
+        document.getElementById("singlePlayerModeModal").style.display = "none";
+        document.getElementById("modeSelectModal").style.display = "block";
     });
 document
     .getElementById("btnMultiPlayer")
@@ -6205,6 +6670,58 @@ document
         document.getElementById("modeSelectModal").style.display = "block";
         if (window.unsubscribeRooms) window.unsubscribeRooms();
     });
+
+// ===== SKILL TREE LOGIC =====
+window.playerSkills = JSON.parse(localStorage.getItem("astrofray_skills")) || { hpLvl: 0, speedLvl: 0, dmgLvl: 0 };
+
+function updateStardustUI() {
+    const sdDisp = document.getElementById("stardustNumDisp");
+    if (sdDisp) sdDisp.innerText = window.totalStardust || 0;
+
+    const ssdDisp = document.getElementById("skillStardustDisp");
+    if (ssdDisp) ssdDisp.innerText = window.totalStardust || 0;
+
+    const hpLvlDisp = document.getElementById("lvlHpDisp");
+    if (hpLvlDisp) hpLvlDisp.innerText = playerSkills.hpLvl;
+
+    const speedLvlDisp = document.getElementById("lvlSpeedDisp");
+    if (speedLvlDisp) speedLvlDisp.innerText = playerSkills.speedLvl;
+
+    const dmgLvlDisp = document.getElementById("lvlDmgDisp");
+    if (dmgLvlDisp) dmgLvlDisp.innerText = playerSkills.dmgLvl;
+}
+
+document.getElementById("btnSkillTree")?.addEventListener("click", () => {
+    document.getElementById("modeSelectModal").style.display = "none";
+    document.getElementById("skillTreeModal").style.display = "block";
+    updateStardustUI();
+});
+
+document.getElementById("btnBackFromSkillTree")?.addEventListener("click", () => {
+    document.getElementById("skillTreeModal").style.display = "none";
+    document.getElementById("modeSelectModal").style.display = "block";
+});
+
+function tryUpgradeSkill(skillKey, cost, maxLvl) {
+    if (window.totalStardust >= cost && window.playerSkills[skillKey] < maxLvl) {
+        window.totalStardust -= cost;
+        window.playerSkills[skillKey] += 1;
+        localStorage.setItem("astrofray_stardust", window.totalStardust.toString());
+        localStorage.setItem("astrofray_skills", JSON.stringify(window.playerSkills));
+        updateStardustUI();
+        try { playExplosionSound("small"); } catch (e) { }
+    } else {
+        if (window.playerSkills[skillKey] >= maxLvl) {
+            window.gameAlert("これ以上強化できません。(MAX LEVEL REACHED)");
+        } else {
+            window.gameAlert("スターダストが不足しています。(NOT ENOUGH STARDUST)");
+        }
+    }
+}
+
+document.getElementById("upgradeHpBtn")?.addEventListener("click", () => tryUpgradeSkill("hpLvl", 100, 10));
+document.getElementById("upgradeSpeedBtn")?.addEventListener("click", () => tryUpgradeSkill("speedLvl", 100, 5));
+document.getElementById("upgradeDmgBtn")?.addEventListener("click", () => tryUpgradeSkill("dmgLvl", 150, 5));
 document
     .getElementById("btnResultToHome")
     ?.addEventListener("click", () => {
@@ -6237,6 +6754,7 @@ function startWithDifficulty(diff) {
     if (minecraftMode && controlMode === "mouse" && !isMobileDevice) {
         try { canvas.requestPointerLock(); } catch (e) { }
     }
+    window.currentGameMode = window.GameModes ? window.GameModes.CLASSIC : "classic";
     window.currentDifficulty = diff;
     document.getElementById("difficultyModal").style.display = "none";
     startSinglePlayerCountdown();
@@ -6254,8 +6772,37 @@ document
     .getElementById("btnBackFromDifficulty")
     ?.addEventListener("click", () => {
         document.getElementById("difficultyModal").style.display = "none";
-        document.getElementById("modeSelectModal").style.display = "block";
+        document.getElementById("singlePlayerModeModal").style.display = "block";
     });
+
+// ===== 新ゲームモード選択ボタン =====
+function startNewGameMode(mode) {
+    if (minecraftMode && controlMode === "mouse" && !isMobileDevice) {
+        try { canvas.requestPointerLock(); } catch (e) { }
+    }
+    window.currentGameMode = mode;
+    window.currentDifficulty = "normal";
+    document.getElementById("singlePlayerModeModal").style.display = "none";
+    startSinglePlayerCountdown();
+}
+
+document.getElementById("btnClassicDogfight")?.addEventListener("click", () => {
+    document.getElementById("singlePlayerModeModal").style.display = "none";
+    document.getElementById("difficultyModal").style.display = "block";
+});
+
+document.getElementById("btnStrangerRace")?.addEventListener("click", () => {
+    startNewGameMode(window.GameModes.STRANGER_RACE);
+});
+document.getElementById("btnMothershipWars")?.addEventListener("click", () => {
+    startNewGameMode(window.GameModes.MOTHERSHIP_WARS);
+});
+document.getElementById("btnParasitePanic")?.addEventListener("click", () => {
+    startNewGameMode(window.GameModes.PARASITE_PANIC);
+});
+document.getElementById("btnGalacticPayload")?.addEventListener("click", () => {
+    startNewGameMode(window.GameModes.GALACTIC_PAYLOAD);
+});
 
 // ランキングタブ切替
 const RANK_TAB_COLORS = {
@@ -7016,7 +7563,7 @@ setupLayoutEditor();
 UILayoutManager.applyToDOM();
 
 /* ========== カスタム gameAlert / gameConfirm ========== */
-(function() {
+(function () {
     const overlay = document.getElementById('gameAlertOverlay');
     const box = document.getElementById('gameAlertBox');
     const titleEl = document.getElementById('gameAlertTitle');
@@ -7038,7 +7585,7 @@ UILayoutManager.applyToDOM();
     /**
      * gameAlert(message, title?) - Promise<void>
      */
-    window.gameAlert = function(message, title) {
+    window.gameAlert = function (message, title) {
         return new Promise(resolve => {
             _resolve = resolve;
             titleEl.innerText = title || 'NOTICE';
@@ -7055,7 +7602,7 @@ UILayoutManager.applyToDOM();
     /**
      * gameConfirm(message, title?) - Promise<boolean>
      */
-    window.gameConfirm = function(message, title) {
+    window.gameConfirm = function (message, title) {
         return new Promise(resolve => {
             _resolve = resolve;
             titleEl.innerText = title || 'CONFIRM';
@@ -7090,12 +7637,12 @@ function initFirebaseAuthUI() {
         setTimeout(initFirebaseAuthUI, 50);
         return;
     }
-    const { 
+    const {
         signInAnonymously, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword,
         signOut, linkWithCredential, EmailAuthProvider
     } = window.firebaseAuthUI;
     const auth = window.firebaseAuth;
-    
+
     let isGuest = true;
 
     // Account Status Elements
@@ -7120,8 +7667,8 @@ function initFirebaseAuthUI() {
     // ======== ヘルパー: Workers API のベースURL ========
     function getWorkerBaseUrl() {
         const isProd = window.currentFirebaseProjectId === "astro-fray";
-        return isProd 
-            ? "https://astro-fray-prod.astro-fray-server.workers.dev" 
+        return isProd
+            ? "https://astro-fray-prod.astro-fray-server.workers.dev"
             : "https://astro-fray-dev.astro-fray-server.workers.dev";
     }
 
@@ -7307,7 +7854,7 @@ function initFirebaseAuthUI() {
                         localStorage.setItem("minecraftMode_v1", cloudData.minecraftMode ? "1" : "0");
                         minecraftMode = cloudData.minecraftMode;
                     }
-                    if (cloudData.forceTouchUI !== undefined) {
+                    if (cloudData.forceTouchUI !== undefined && localStorage.getItem("forceTouchUI_v1") === null) {
                         localStorage.setItem("forceTouchUI_v1", cloudData.forceTouchUI ? "1" : "0");
                         useTouchUI = cloudData.forceTouchUI;
                         updateTouchUIVisibility();
@@ -7319,17 +7866,17 @@ function initFirebaseAuthUI() {
         } else {
             try {
                 await signInAnonymously(auth);
-            } catch(e) {
+            } catch (e) {
                 console.error("Anonymous login failed", e);
             }
         }
     });
 
-    window.openAuthModal = function() {
+    window.openAuthModal = function () {
         authErrorMsg.innerText = "";
         authEmailInput.value = "";
         authPasswordInput.value = "";
-        
+
         // 他の画面が開いていたら一時的に隠す
         const viewsToHide = ["modeSelectModal", "pauseSettingsMenu", "startScreen"];
         viewsToHide.forEach(id => {
@@ -7400,8 +7947,10 @@ function initFirebaseAuthUI() {
         if (cloudData.minecraftMode !== undefined) {
             localStorage.setItem("minecraftMode_v1", cloudData.minecraftMode ? "1" : "0");
         }
-        if (cloudData.forceTouchUI !== undefined) {
+        if (cloudData.forceTouchUI !== undefined && localStorage.getItem("forceTouchUI_v1") === null) {
             localStorage.setItem("forceTouchUI_v1", cloudData.forceTouchUI ? "1" : "0");
+            useTouchUI = cloudData.forceTouchUI;
+            updateTouchUIVisibility();
         }
         await window.gameAlert("クラウドから設定を復元しました。\nページを再読み込みして反映します。", "RESTORE");
         window.location.reload();
@@ -7409,7 +7958,7 @@ function initFirebaseAuthUI() {
 
     function hideAuthModal() {
         authModal.style.display = "none";
-        
+
         // 隠していた画面を元に戻す
         const viewsToHide = ["modeSelectModal", "pauseSettingsMenu", "startScreen"];
         let restoredAny = false;
@@ -7597,14 +8146,14 @@ function initFirebaseAuthUI() {
 
         document.getElementById("conflictLocalScore").innerText = local.score || 0;
         document.getElementById("conflictLocalTime").innerText = local.playTimeSeconds || 0;
-        
+
         document.getElementById("conflictCloudScore").innerText = cloud.score || 0;
         document.getElementById("conflictCloudTime").innerText = cloud.playTimeSeconds || 0;
 
         btnConfirmConflict.onclick = async () => {
             btnConfirmConflict.disabled = true;
             btnConfirmConflict.innerText = "処理中...";
-            
+
             // サーバー側でデータ移行のみ実行（Auth削除は既に完了済み）
             if (oldUidForPushing) {
                 const migrated = await migrateData(oldUidForPushing, selectedConflictChoice);
@@ -7615,13 +8164,13 @@ function initFirebaseAuthUI() {
                     return;
                 }
             }
-            
+
             if (selectedConflictChoice === 'local') {
                 await window.gameAlert("現在のプレイデータで上書きしました！", "DATA SYNCED");
             } else {
                 await window.gameAlert("クラウドのデータを引き継ぎました！", "DATA SYNCED");
             }
-            
+
             dataConflictModal.style.display = "none";
             btnConfirmConflict.innerText = "選択したデータで引き継ぐ";
             await window.gameAlert("画面を再読み込みして変更を反映します...", "RELOADING");
